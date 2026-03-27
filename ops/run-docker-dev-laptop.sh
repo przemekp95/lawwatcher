@@ -9,12 +9,17 @@ ensure_docker_on_path
 require_cmd docker
 
 include_ai=false
+build_local=false
 ai_model="llama3.2:1b"
 
 while (($# > 0)); do
   case "$1" in
     --include-ai)
       include_ai=true
+      shift
+      ;;
+    --build-local)
+      build_local=true
       shift
       ;;
     --ai-model)
@@ -33,15 +38,23 @@ cd "$repo_root"
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  -f ops/compose/docker-compose.build.yml
   --env-file ops/env/dev-laptop.env.example
 )
+
+if [[ "$build_local" == "true" ]]; then
+  compose_args+=(-f ops/compose/docker-compose.build.yml)
+fi
 
 if [[ "$include_ai" == "true" ]]; then
   compose_args+=(--profile ai)
 fi
 
-docker "${compose_args[@]}" up -d --build
+if [[ "$build_local" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build
+else
+  docker "${compose_args[@]}" pull
+  docker "${compose_args[@]}" up -d
+fi
 
 if [[ "$include_ai" == "true" ]]; then
   ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"

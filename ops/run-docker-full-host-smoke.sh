@@ -11,6 +11,7 @@ require_cmd curl
 require_cmd node
 
 include_opensearch=false
+build_local=false
 ai_model="llama3.2:1b"
 embedding_model="nomic-embed-text"
 
@@ -18,6 +19,10 @@ while (($# > 0)); do
   case "$1" in
     --include-opensearch)
       include_opensearch=true
+      shift
+      ;;
+    --build-local)
+      build_local=true
       shift
       ;;
     --ai-model)
@@ -41,11 +46,16 @@ compose_args=(
   compose
   -f ops/compose/docker-compose.yml
   -f ops/compose/docker-compose.full-host.yml
-  -f ops/compose/docker-compose.build.yml
-  -f ops/compose/docker-compose.full-host.build.yml
   --env-file ops/env/full-host.env.example
   --profile full-host
 )
+
+if [[ "$build_local" == "true" ]]; then
+  compose_args+=(
+    -f ops/compose/docker-compose.build.yml
+    -f ops/compose/docker-compose.full-host.build.yml
+  )
+fi
 
 if [[ "$include_opensearch" == "true" ]]; then
   compose_args+=(--profile opensearch)
@@ -56,7 +66,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
+if [[ "$build_local" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
+else
+  docker "${compose_args[@]}" pull >/dev/null
+  docker "${compose_args[@]}" up -d --remove-orphans >/dev/null
+fi
 
 ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
 if [[ "$include_opensearch" == "true" ]]; then

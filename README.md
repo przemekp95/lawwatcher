@@ -24,10 +24,16 @@ docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.e
 docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.env.example up -d
 ```
 
-Laptop-first baseline through the local shell wrapper and build override:
+Laptop-first baseline through the local shell wrapper and prebuilt images:
 
 ```bash
 bash ops/run-docker-dev-laptop.sh
+```
+
+Local build override for development or CI:
+
+```bash
+bash ops/run-docker-dev-laptop.sh --build-local
 ```
 
 On-demand local AI through raw compose and prebuilt images:
@@ -37,7 +43,7 @@ docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.e
 docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.env.example --profile ai up -d
 ```
 
-On-demand local AI through the local shell wrapper and build override:
+On-demand local AI through the local shell wrapper and prebuilt images:
 
 ```bash
 bash ops/run-docker-dev-laptop.sh --include-ai
@@ -55,11 +61,18 @@ Stop the Docker laptop-first stack:
 bash ops/stop-docker-dev-laptop.sh
 ```
 
-Docker laptop-first smoke:
+Docker laptop-first smoke against prebuilt images:
 
 ```bash
 bash ops/run-docker-dev-laptop-smoke.sh
 bash ops/run-docker-dev-laptop-smoke.sh --include-ai
+```
+
+Local build override for smoke and CI:
+
+```bash
+bash ops/run-docker-dev-laptop-smoke.sh --build-local
+bash ops/run-docker-dev-laptop-smoke.sh --build-local --include-ai
 ```
 
 Expanded full-host profile through raw compose and prebuilt images:
@@ -69,10 +82,16 @@ docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.f
 docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.full-host.yml --env-file ops/env/full-host.env.example --profile full-host up -d
 ```
 
-Expanded full-host profile through the local shell wrapper and build override:
+Expanded full-host profile through the local shell wrapper and prebuilt images:
 
 ```bash
 bash ops/run-docker-full-host.sh
+```
+
+Local build override for development or CI:
+
+```bash
+bash ops/run-docker-full-host.sh --build-local
 ```
 
 Full-host with optional OpenSearch through raw compose and prebuilt images:
@@ -82,10 +101,16 @@ docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.f
 docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.full-host.yml --env-file ops/env/full-host.env.example --profile full-host --profile opensearch up -d
 ```
 
-Full-host with optional OpenSearch through the local shell wrapper and build override:
+Full-host with optional OpenSearch through the local shell wrapper and prebuilt images:
 
 ```bash
 bash ops/run-docker-full-host.sh --include-opensearch
+```
+
+Local build override for development or CI:
+
+```bash
+bash ops/run-docker-full-host.sh --build-local --include-opensearch
 ```
 
 Stop the Docker full-host stack:
@@ -94,14 +119,21 @@ Stop the Docker full-host stack:
 bash ops/stop-docker-full-host.sh
 ```
 
-Docker full-host smoke:
+Docker full-host smoke against prebuilt images:
 
 ```bash
 bash ops/run-docker-full-host-smoke.sh
 bash ops/run-docker-full-host-smoke.sh --include-opensearch
 ```
 
-`ops/compose/docker-compose.build.yml` and `ops/compose/docker-compose.full-host.build.yml` exist only as local build overrides for wrappers and smoke scripts. They are not the primary runtime contract.
+Local build override for smoke and CI:
+
+```bash
+bash ops/run-docker-full-host-smoke.sh --build-local
+bash ops/run-docker-full-host-smoke.sh --build-local --include-opensearch
+```
+
+`ops/compose/docker-compose.build.yml` and `ops/compose/docker-compose.full-host.build.yml` exist only as opt-in local build overrides for wrappers and CI smoke scripts. They are not the primary runtime contract.
 
 Browser-level verification against the local portal:
 

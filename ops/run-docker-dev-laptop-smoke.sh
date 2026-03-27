@@ -11,12 +11,17 @@ require_cmd curl
 require_cmd node
 
 include_ai=false
+build_local=false
 ai_model="llama3.2:1b"
 
 while (($# > 0)); do
   case "$1" in
     --include-ai)
       include_ai=true
+      shift
+      ;;
+    --build-local)
+      build_local=true
       shift
       ;;
     --ai-model)
@@ -35,9 +40,12 @@ cd "$repo_root"
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  -f ops/compose/docker-compose.build.yml
   --env-file ops/env/dev-laptop.env.example
 )
+
+if [[ "$build_local" == "true" ]]; then
+  compose_args+=(-f ops/compose/docker-compose.build.yml)
+fi
 
 if [[ "$include_ai" == "true" ]]; then
   compose_args+=(--profile ai)
@@ -48,7 +56,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker "${compose_args[@]}" up -d --build >/dev/null
+if [[ "$build_local" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build >/dev/null
+else
+  docker "${compose_args[@]}" pull >/dev/null
+  docker "${compose_args[@]}" up -d >/dev/null
+fi
 
 api_health="$(wait_http_ok "http://127.0.0.1:8080/health/ready")"
 portal_root="$(wait_http_ok "http://127.0.0.1:8081/")"
