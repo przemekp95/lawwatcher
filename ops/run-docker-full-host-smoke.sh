@@ -89,17 +89,6 @@ wait_http_ok "http://127.0.0.1:5396/health/ready" >/dev/null
 
 acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/acts")"
 profiles_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/profiles")"
-search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=VAT")"
-capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
-
-if [[ "$include_opensearch" == "true" ]]; then
-  backend="$(printf '%s' "$search_json" | json_eval "process.stdout.write(String(data.backend));")"
-  capabilities_backend="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(data.search.backend));")"
-  if [[ "$backend" != "1" || "$capabilities_backend" != "1" ]]; then
-    echo "Expected HybridVector (1) backend in full-host OpenSearch smoke." >&2
-    exit 1
-  fi
-fi
 
 replay_payload='{"scope":"docker-full-host-replay-smoke"}'
 replay_accepted="$(curl -fsS --max-time 10 -X POST "http://127.0.0.1:8080/v1/replays" \
@@ -116,6 +105,18 @@ backfill_accepted="$(curl -fsS --max-time 10 -X POST "http://127.0.0.1:8080/v1/b
   -d "$backfill_payload")"
 backfill_id="$(printf '%s' "$backfill_accepted" | json_eval "process.stdout.write(String(data.id));")"
 completed_backfill_json="$(wait_entity_completed "http://127.0.0.1:8080/v1/backfills" "$backfill_id")"
+
+search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=VAT")"
+capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
+
+if [[ "$include_opensearch" == "true" ]]; then
+  backend="$(printf '%s' "$search_json" | json_eval "process.stdout.write(String(data.backend));")"
+  capabilities_backend="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(data.search.backend));")"
+  if [[ "$backend" != "1" || "$capabilities_backend" != "1" ]]; then
+    echo "Expected HybridVector (1) backend in full-host OpenSearch smoke." >&2
+    exit 1
+  fi
+fi
 
 profile_id="$(printf '%s' "$profiles_json" | json_eval "process.stdout.write(String(data[0].id));")"
 unique_suffix="$(node -e "console.log(require('crypto').randomUUID().replace(/-/g,'').slice(0,8))")"

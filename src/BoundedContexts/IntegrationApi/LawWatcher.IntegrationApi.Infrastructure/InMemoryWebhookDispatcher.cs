@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using LawWatcher.BuildingBlocks.Ports;
+using Microsoft.Extensions.Logging;
 
 namespace LawWatcher.IntegrationApi.Infrastructure;
 
@@ -50,10 +51,12 @@ public sealed class InMemoryWebhookDispatcher : IWebhookDispatcher
 
 public sealed class SignedHttpWebhookDispatcher(
     HttpClient httpClient,
-    WebhookDeliveryOptions options) : IWebhookDispatcher
+    WebhookDeliveryOptions options,
+    ILogger<SignedHttpWebhookDispatcher> logger) : IWebhookDispatcher
 {
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
     private readonly WebhookDeliveryOptions _options = options ?? throw new ArgumentNullException(nameof(options));
+    private readonly ILogger<SignedHttpWebhookDispatcher> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task DispatchAsync(WebhookDispatchRequest request, CancellationToken cancellationToken)
     {
@@ -80,6 +83,11 @@ public sealed class SignedHttpWebhookDispatcher(
 
         using var response = await _httpClient.SendAsync(message, cancellationToken);
         response.EnsureSuccessStatusCode();
+        _logger.LogInformation(
+            "signed webhook dispatched. flow=signed-webhook eventType={EventType} callbackUrl={CallbackUrl} statusCode={StatusCode}",
+            request.EventType,
+            request.CallbackUrl,
+            (int)response.StatusCode);
     }
 
     internal IReadOnlyDictionary<string, string> CreateHeaders(WebhookDispatchRequest request)

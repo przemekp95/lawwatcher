@@ -21,6 +21,7 @@ using LawWatcher.BuildingBlocks.Ports;
 using MassTransit;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.IO;
 
 namespace LawWatcher.Worker.Lite;
 
@@ -141,11 +142,7 @@ if (sqlServerStorageConnectionString is not null &&
         services.UsingRabbitMq((context, configuration) =>
         {
             ConfigureRabbitMqHost(configuration, rabbitMqConnectionString);
-            configuration.UseMessageRetry(retryConfiguration =>
-            {
-                retryConfiguration.Handle<SqlException>(exception => exception.Number == 1205);
-                retryConfiguration.Interval(5, TimeSpan.FromSeconds(2));
-            });
+            ConfigureBrokerConsumerResiliency(configuration);
             configuration.ConfigureEndpoints(context);
         });
     });
@@ -303,19 +300,17 @@ else
 {
     builder.Services.AddSingleton<IWebhookEventDispatchStore>(_ => new FileBackedWebhookEventDispatchStore(statePaths.WebhookEventDispatchesRoot));
 }
-builder.Services.AddSingleton<IEmbeddingService>(serviceProvider =>
+if (effectiveSearchCapabilities.UseHybridSearch)
 {
-    if (!effectiveSearchCapabilities.UseHybridSearch)
+    builder.Services.AddSingleton<IEmbeddingService>(serviceProvider =>
     {
-        return new DeterministicEmbeddingService();
-    }
-
-    var resolvedOllamaOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OllamaOptions>>().CurrentValue;
-    var resolvedEmbeddingOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LocalEmbeddingOptions>>().CurrentValue;
-    return new OllamaEmbeddingService(
-        CreateOllamaHttpClient(resolvedOllamaOptions),
-        resolvedEmbeddingOptions.DefaultModel);
-});
+        var resolvedOllamaOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OllamaOptions>>().CurrentValue;
+        var resolvedEmbeddingOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LocalEmbeddingOptions>>().CurrentValue;
+        return new OllamaEmbeddingService(
+            CreateOllamaHttpClient(resolvedOllamaOptions),
+            resolvedEmbeddingOptions.DefaultModel);
+    });
+}
 if (sqlServerStorageConnectionString is not null)
 {
     if (effectiveSearchCapabilities.UseHybridSearch)
@@ -359,7 +354,9 @@ builder.Services.AddSingleton<IEventFeedSource, AlertsEventFeedSource>();
 builder.Services.AddSingleton<IEventFeedSource, ReplaysEventFeedSource>();
 builder.Services.AddSingleton<IEventFeedSource, BackfillsEventFeedSource>();
 builder.Services.AddSingleton<InMemoryEmailNotificationChannel>();
-builder.Services.AddSingleton<IWebhookDispatcher>(_ => WebhookDispatcherRuntimeFactory.Create(webhookDeliveryOptions));
+builder.Services.AddSingleton<IWebhookDispatcher>(serviceProvider => WebhookDispatcherRuntimeFactory.Create(
+    webhookDeliveryOptions,
+    serviceProvider.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<INotificationChannel>(serviceProvider => serviceProvider.GetRequiredService<InMemoryEmailNotificationChannel>());
 builder.Services.AddSingleton<INotificationChannel, WebhookNotificationChannel>();
 builder.Services.AddSingleton<BillsQueryService>();
@@ -516,6 +513,31 @@ static void ConfigureRabbitMqHost(IRabbitMqBusFactoryConfigurator configuration,
     {
         host.Username(username);
         host.Password(password);
+    });
+}
+
+static void ConfigureBrokerConsumerResiliency(IRabbitMqBusFactoryConfigurator configuration)
+{
+    configuration.UseDelayedRedelivery(redeliveryConfiguration =>
+    {
+        redeliveryConfiguration.Handle<SqlException>();
+        redeliveryConfiguration.Handle<HttpRequestException>();
+        redeliveryConfiguration.Handle<IOException>();
+        redeliveryConfiguration.Handle<TimeoutException>();
+        redeliveryConfiguration.Handle<TaskCanceledException>();
+        redeliveryConfiguration.Intervals(
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromMinutes(1),
+            TimeSpan.FromMinutes(5));
+    });
+    configuration.UseMessageRetry(retryConfiguration =>
+    {
+        retryConfiguration.Handle<SqlException>();
+        retryConfiguration.Handle<HttpRequestException>();
+        retryConfiguration.Handle<IOException>();
+        retryConfiguration.Handle<TimeoutException>();
+        retryConfiguration.Handle<TaskCanceledException>();
+        retryConfiguration.Interval(3, TimeSpan.FromSeconds(2));
     });
 }
 }

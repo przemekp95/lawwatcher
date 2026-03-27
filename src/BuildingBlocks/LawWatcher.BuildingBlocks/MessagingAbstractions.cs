@@ -130,6 +130,37 @@ public interface IMessagingDiagnosticsStore
     Task<MessagingDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken);
 }
 
+public sealed record BrokerEndpointDiagnosticsSnapshot(
+    string EndpointName,
+    string QueueName,
+    string Status,
+    int ConsumerCount,
+    int MessageCount,
+    int ReadyCount,
+    int UnackedCount,
+    int FaultCount,
+    int DeadLetterCount,
+    long RedeliveryCount);
+
+public sealed record BrokerDiagnosticsSnapshot(
+    bool IsAvailable,
+    int QueueCount,
+    int ConsumerCount,
+    int MessageCount,
+    int ReadyCount,
+    int UnackedCount,
+    int FaultCount,
+    int DeadLetterCount,
+    long RedeliveryCount,
+    IReadOnlyCollection<BrokerEndpointDiagnosticsSnapshot> Endpoints);
+
+public interface IBrokerDiagnosticsStore
+{
+    bool IsAvailable { get; }
+
+    Task<BrokerDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken);
+}
+
 public sealed class EventStreamConcurrencyException : InvalidOperationException
 {
     public EventStreamConcurrencyException(string streamId, long expectedVersion, long actualVersion)

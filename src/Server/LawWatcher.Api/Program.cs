@@ -28,6 +28,8 @@ using LawWatcher.TaxonomyAndProfiles.Infrastructure;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Security.Claims;
+using System.Net.Http.Headers;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,6 +48,7 @@ Directory.CreateDirectory(persistentStateRoot);
 var statePaths = LawWatcherStatePaths.ForRoot(persistentStateRoot);
 var sqlServerStorageConnectionString = ResolveSqlServerStorageConnectionString(stateStorageOptions, builder.Configuration);
 var rabbitMqConnectionString = ResolveRabbitMqConnectionString(builder.Configuration);
+var rabbitMqManagementSettings = ResolveRabbitMqManagementConnectionSettings(rabbitMqConnectionString);
 var runtimeOptions = builder.Configuration.GetSection("LawWatcher:Runtime").Get<LawWatcherRuntimeOptions>() ?? new LawWatcherRuntimeOptions();
 var localLlmOptions = builder.Configuration.GetSection("LawWatcher:LocalLlmWorker").Get<LocalLlmWorkerOptions>() ?? new LocalLlmWorkerOptions();
 var localEmbeddingOptions = builder.Configuration.GetSection("LawWatcher:LocalEmbedding").Get<LocalEmbeddingOptions>() ?? new LocalEmbeddingOptions();
@@ -156,11 +159,22 @@ else
     builder.Services.AddSingleton<IMessagingDiagnosticsStore>(_ => new DisabledMessagingDiagnosticsStore());
     builder.Services.AddSingleton<IRetentionMaintenanceStore>(_ => new DisabledRetentionMaintenanceStore());
 }
+if (rabbitMqManagementSettings is { } brokerDiagnosticsSettings)
+{
+    builder.Services.AddSingleton<IBrokerDiagnosticsStore>(_ => new RabbitMqBrokerDiagnosticsStore(
+        CreateRabbitMqManagementHttpClient(brokerDiagnosticsSettings),
+        brokerDiagnosticsSettings.VirtualHost));
+}
+else
+{
+    builder.Services.AddSingleton<IBrokerDiagnosticsStore>(_ => new DisabledBrokerDiagnosticsStore());
+}
 builder.Services.AddSingleton(searchInfrastructureCapabilities);
 builder.Services.AddSingleton(aiInfrastructureCapabilities);
 builder.Services.AddSingleton<ISystemCapabilitiesProvider, ConfigurationSystemCapabilitiesProvider>();
 builder.Services.AddSingleton(_ => new MessagingDiagnosticsQueryService(
     _.GetRequiredService<IMessagingDiagnosticsStore>(),
+    _.GetRequiredService<IBrokerDiagnosticsStore>(),
     sqlOutboxEnabled: sqlServerStorageConnectionString is not null,
     brokerEnabled: sqlServerStorageConnectionString is not null && rabbitMqConnectionString is not null));
 builder.Services.AddSingleton<RetentionMaintenanceCommandService>();
@@ -175,19 +189,17 @@ builder.Services.AddSingleton<IDocumentStore>(_ =>
     };
 });
 builder.Services.AddSingleton<IOcrService, PlainTextOcrService>();
-builder.Services.AddSingleton<IEmbeddingService>(serviceProvider =>
+if (effectiveSearchCapabilities.UseHybridSearch)
 {
-    if (!effectiveSearchCapabilities.UseHybridSearch)
+    builder.Services.AddSingleton<IEmbeddingService>(serviceProvider =>
     {
-        return new DeterministicEmbeddingService();
-    }
-
-    var resolvedOllamaOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OllamaOptions>>().CurrentValue;
-    var resolvedEmbeddingOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LocalEmbeddingOptions>>().CurrentValue;
-    return new OllamaEmbeddingService(
-        CreateOllamaHttpClient(resolvedOllamaOptions),
-        resolvedEmbeddingOptions.DefaultModel);
-});
+        var resolvedOllamaOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OllamaOptions>>().CurrentValue;
+        var resolvedEmbeddingOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LocalEmbeddingOptions>>().CurrentValue;
+        return new OllamaEmbeddingService(
+            CreateOllamaHttpClient(resolvedOllamaOptions),
+            resolvedEmbeddingOptions.DefaultModel);
+    });
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerApiClientProjectionStore>(_ => new SqlServerApiClientProjectionStore(sqlServerStorageConnectionString));
@@ -516,7 +528,9 @@ else
     builder.Services.AddSingleton<ISearchIndexer>(serviceProvider => serviceProvider.GetRequiredService<ISearchDocumentIndex>() as ISearchIndexer
         ?? throw new InvalidOperationException("Search document index must implement the search indexer port."));
 }
-builder.Services.AddSingleton<IWebhookDispatcher>(_ => WebhookDispatcherRuntimeFactory.Create(webhookDeliveryOptions));
+builder.Services.AddSingleton<IWebhookDispatcher>(serviceProvider => WebhookDispatcherRuntimeFactory.Create(
+    webhookDeliveryOptions,
+    serviceProvider.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<SearchIndexingService>();
 builder.Services.AddSingleton<SearchQueryService>();
 builder.Services.AddHostedService<ApiClientsBootstrapHostedService>();
@@ -587,6 +601,36 @@ static string? ResolveRabbitMqConnectionString(IConfiguration configuration)
         : connectionString;
 }
 
+static (Uri BaseAddress, string Username, string Password, string VirtualHost)? ResolveRabbitMqManagementConnectionSettings(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return null;
+    }
+
+    var uri = new Uri(connectionString, UriKind.Absolute);
+    var userInfo = uri.UserInfo.Split(':', 2, StringSplitOptions.None);
+    var username = userInfo.Length >= 1 && userInfo[0].Length != 0
+        ? Uri.UnescapeDataString(userInfo[0])
+        : "guest";
+    var password = userInfo.Length == 2
+        ? Uri.UnescapeDataString(userInfo[1])
+        : "guest";
+    var virtualHost = string.IsNullOrWhiteSpace(uri.AbsolutePath) || uri.AbsolutePath == "/"
+        ? "/"
+        : Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
+    var managementScheme = string.Equals(uri.Scheme, "amqps", StringComparison.OrdinalIgnoreCase)
+        ? "https"
+        : "http";
+    var managementPort = managementScheme == "https" ? 15671 : 15672;
+
+    return (
+        new UriBuilder(managementScheme, uri.Host, managementPort).Uri,
+        username,
+        password,
+        virtualHost);
+}
+
 static void ConfigureRabbitMqHost(IRabbitMqBusFactoryConfigurator configuration, string connectionString)
 {
     var uri = new Uri(connectionString, UriKind.Absolute);
@@ -606,6 +650,18 @@ static void ConfigureRabbitMqHost(IRabbitMqBusFactoryConfigurator configuration,
         host.Username(username);
         host.Password(password);
     });
+}
+
+static HttpClient CreateRabbitMqManagementHttpClient((Uri BaseAddress, string Username, string Password, string VirtualHost) settings)
+{
+    var client = new HttpClient
+    {
+        BaseAddress = settings.BaseAddress,
+        Timeout = TimeSpan.FromSeconds(5)
+    };
+    var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{settings.Username}:{settings.Password}"));
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+    return client;
 }
 
 static bool DetermineSqlServerFullTextAvailability(StateStorageOptions options, string? connectionString)

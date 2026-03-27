@@ -8,6 +8,8 @@ using LawWatcher.LegalCorpus.Application;
 using LawWatcher.LegalCorpus.Infrastructure;
 using MassTransit;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Data.SqlClient;
+using System.IO;
 
 namespace LawWatcher.Worker.Ai;
 
@@ -65,6 +67,7 @@ public static class WorkerAiHostApplication
                 services.UsingRabbitMq((context, configuration) =>
                 {
                     ConfigureRabbitMqHost(configuration, rabbitMqConnectionString);
+                    ConfigureBrokerConsumerResiliency(configuration);
                     configuration.ConfigureEndpoints(context);
                 });
             });
@@ -183,6 +186,31 @@ public static class WorkerAiHostApplication
         {
             host.Username(username);
             host.Password(password);
+        });
+    }
+
+    private static void ConfigureBrokerConsumerResiliency(IRabbitMqBusFactoryConfigurator configuration)
+    {
+        configuration.UseDelayedRedelivery(redeliveryConfiguration =>
+        {
+            redeliveryConfiguration.Handle<SqlException>();
+            redeliveryConfiguration.Handle<HttpRequestException>();
+            redeliveryConfiguration.Handle<IOException>();
+            redeliveryConfiguration.Handle<TimeoutException>();
+            redeliveryConfiguration.Handle<TaskCanceledException>();
+            redeliveryConfiguration.Intervals(
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromMinutes(1),
+                TimeSpan.FromMinutes(5));
+        });
+        configuration.UseMessageRetry(retryConfiguration =>
+        {
+            retryConfiguration.Handle<SqlException>();
+            retryConfiguration.Handle<HttpRequestException>();
+            retryConfiguration.Handle<IOException>();
+            retryConfiguration.Handle<TimeoutException>();
+            retryConfiguration.Handle<TaskCanceledException>();
+            retryConfiguration.Interval(3, TimeSpan.FromSeconds(2));
         });
     }
 }

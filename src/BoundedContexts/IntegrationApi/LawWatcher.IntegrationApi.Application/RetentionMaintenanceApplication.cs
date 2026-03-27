@@ -7,13 +7,17 @@ public sealed record RunRetentionMaintenanceCommand(
     int PublishedOutboxRetentionHours,
     int ProcessedInboxRetentionHours,
     int EventFeedRetentionHours,
-    int? SearchDocumentsRetentionHours) : Command;
+    int? SearchDocumentsRetentionHours,
+    int? AiTasksRetentionHours,
+    int? DocumentArtifactsRetentionHours) : Command;
 
 public sealed record RetentionMaintenancePolicy(
     TimeSpan PublishedOutboxRetention,
     TimeSpan ProcessedInboxRetention,
     TimeSpan EventFeedRetention,
-    TimeSpan? SearchDocumentsRetention);
+    TimeSpan? SearchDocumentsRetention,
+    TimeSpan? AiTasksRetention,
+    TimeSpan? DocumentArtifactsRetention);
 
 public sealed record RetentionMaintenanceExecutionResult(
     bool MaintenanceAvailable,
@@ -27,7 +31,15 @@ public sealed record RetentionMaintenanceExecutionResult(
     DateTimeOffset? SearchDocumentsCutoffUtc,
     int DeletedSearchDocumentsCount,
     bool SearchDocumentsRetentionApplied,
-    string SearchDocumentsRetentionReason);
+    string SearchDocumentsRetentionReason,
+    DateTimeOffset? AiTasksCutoffUtc,
+    int DeletedAiTasksCount,
+    bool AiTasksRetentionApplied,
+    string AiTasksRetentionReason,
+    DateTimeOffset? DocumentArtifactsCutoffUtc,
+    int DeletedDocumentArtifactsCount,
+    bool DocumentArtifactsRetentionApplied,
+    string DocumentArtifactsRetentionReason);
 
 public interface IRetentionMaintenanceStore
 {
@@ -53,7 +65,9 @@ public sealed class RetentionMaintenanceCommandService(IRetentionMaintenanceStor
             ValidateHours(command.PublishedOutboxRetentionHours, nameof(command.PublishedOutboxRetentionHours), "Published outbox retention"),
             ValidateHours(command.ProcessedInboxRetentionHours, nameof(command.ProcessedInboxRetentionHours), "Processed inbox retention"),
             ValidateHours(command.EventFeedRetentionHours, nameof(command.EventFeedRetentionHours), "Event-feed retention"),
-            ValidateOptionalHours(command.SearchDocumentsRetentionHours, nameof(command.SearchDocumentsRetentionHours), "Search-document retention"));
+            ValidateOptionalHours(command.SearchDocumentsRetentionHours, nameof(command.SearchDocumentsRetentionHours), "Search-document retention"),
+            ValidateOptionalHours(command.AiTasksRetentionHours, nameof(command.AiTasksRetentionHours), "AI-task retention"),
+            ValidateOptionalHours(command.DocumentArtifactsRetentionHours, nameof(command.DocumentArtifactsRetentionHours), "Document-artifact retention"));
         var execution = await store.RunAsync(policy, command.RequestedAtUtc, cancellationToken);
 
         return new RetentionMaintenanceResponse(
@@ -68,7 +82,15 @@ public sealed class RetentionMaintenanceCommandService(IRetentionMaintenanceStor
             execution.SearchDocumentsCutoffUtc,
             execution.DeletedSearchDocumentsCount,
             execution.SearchDocumentsRetentionApplied,
-            execution.SearchDocumentsRetentionReason);
+            execution.SearchDocumentsRetentionReason,
+            execution.AiTasksCutoffUtc,
+            execution.DeletedAiTasksCount,
+            execution.AiTasksRetentionApplied,
+            execution.AiTasksRetentionReason,
+            execution.DocumentArtifactsCutoffUtc,
+            execution.DeletedDocumentArtifactsCount,
+            execution.DocumentArtifactsRetentionApplied,
+            execution.DocumentArtifactsRetentionReason);
     }
 
     private static TimeSpan ValidateHours(int hours, string paramName, string label)

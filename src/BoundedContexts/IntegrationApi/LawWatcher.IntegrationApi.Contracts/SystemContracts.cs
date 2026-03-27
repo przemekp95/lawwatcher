@@ -50,6 +50,30 @@ public sealed record MessagingInboxResponse(
     int ProcessedCount,
     IReadOnlyCollection<MessagingInboxConsumerResponse> Consumers);
 
+public sealed record MessagingBrokerEndpointResponse(
+    string EndpointName,
+    string QueueName,
+    string Status,
+    int ConsumerCount,
+    int MessageCount,
+    int ReadyCount,
+    int UnackedCount,
+    int FaultCount,
+    int DeadLetterCount,
+    long RedeliveryCount);
+
+public sealed record MessagingBrokerResponse(
+    bool DiagnosticsAvailable,
+    int QueueCount,
+    int ConsumerCount,
+    int MessageCount,
+    int ReadyCount,
+    int UnackedCount,
+    int FaultCount,
+    int DeadLetterCount,
+    long RedeliveryCount,
+    IReadOnlyCollection<MessagingBrokerEndpointResponse> Endpoints);
+
 public sealed record MessagingDiagnosticsResponse(
     string DeliveryMode,
     string PollerMode,
@@ -57,13 +81,16 @@ public sealed record MessagingDiagnosticsResponse(
     bool SqlOutboxEnabled,
     bool DiagnosticsAvailable,
     MessagingOutboxResponse Outbox,
-    MessagingInboxResponse Inbox);
+    MessagingInboxResponse Inbox,
+    MessagingBrokerResponse Broker);
 
 public sealed record RunRetentionMaintenanceRequest(
     int PublishedOutboxRetentionHours,
     int ProcessedInboxRetentionHours,
     int EventFeedRetentionHours,
-    int? SearchDocumentsRetentionHours);
+    int? SearchDocumentsRetentionHours,
+    int? AiTasksRetentionHours,
+    int? DocumentArtifactsRetentionHours);
 
 public sealed record RetentionMaintenanceResponse(
     bool MaintenanceAvailable,
@@ -77,7 +104,15 @@ public sealed record RetentionMaintenanceResponse(
     DateTimeOffset? SearchDocumentsCutoffUtc,
     int DeletedSearchDocumentsCount,
     bool SearchDocumentsRetentionApplied,
-    string SearchDocumentsRetentionReason);
+    string SearchDocumentsRetentionReason,
+    DateTimeOffset? AiTasksCutoffUtc,
+    int DeletedAiTasksCount,
+    bool AiTasksRetentionApplied,
+    string AiTasksRetentionReason,
+    DateTimeOffset? DocumentArtifactsCutoffUtc,
+    int DeletedDocumentArtifactsCount,
+    bool DocumentArtifactsRetentionApplied,
+    string DocumentArtifactsRetentionReason);
 
 public sealed record SearchHitResponse(
     string Id,

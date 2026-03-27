@@ -26,10 +26,15 @@ public sealed class Worker(
     AlertNotificationDispatchService alertNotificationDispatchService,
     AlertWebhookDispatchService alertWebhookDispatchService) : BackgroundService
 {
+    private static readonly TimeSpan BrokerProjectionCatchupPassDelay = TimeSpan.FromSeconds(5);
+    private const int BrokerProjectionCatchupPassLimit = 6;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var brokerModeLogged = false;
         var brokerProjectionCatchupCompleted = false;
+        var brokerProjectionCatchupPassesCompleted = 0;
+        DateTimeOffset? nextBrokerProjectionCatchupAtUtc = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -63,26 +68,44 @@ public sealed class Worker(
             if (!rabbitMqBrokerModeEnabled)
             {
                 brokerProjectionCatchupCompleted = false;
+                brokerProjectionCatchupPassesCompleted = 0;
+                nextBrokerProjectionCatchupAtUtc = null;
             }
 
             if (projectionEnabled && rabbitMqBrokerModeEnabled && !brokerProjectionCatchupCompleted)
             {
+                if (nextBrokerProjectionCatchupAtUtc is { } nextCatchupAtUtc &&
+                    nextCatchupAtUtc > DateTimeOffset.UtcNow)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    continue;
+                }
+
                 var initialAlertRefresh = await alertProjectionRefreshService.RefreshAsync(stoppingToken);
                 var initialEventFeedRefresh = await eventFeedProjectionRefreshService.RefreshAsync(stoppingToken);
                 var initialSearchRefresh = await searchProjectionRefreshService.RefreshAsync(stoppingToken);
+                brokerProjectionCatchupPassesCompleted++;
 
                 logger.LogInformation(
-                    "worker-lite broker projection catch-up completed. profile={Profile} alertsGenerated={AlertCount} eventFeedRebuilt={EventFeedRebuilt} eventFeedItems={EventFeedCount} searchRebuilt={SearchRebuilt} searchDocuments={SearchDocumentCount}",
+                    "worker-lite broker projection catch-up pass completed. profile={Profile} pass={Pass} passLimit={PassLimit} alertsGenerated={AlertCount} eventFeedRebuilt={EventFeedRebuilt} eventFeedItems={EventFeedCount} searchRebuilt={SearchRebuilt} searchDocuments={SearchDocumentCount}",
                     runtimeProfile.Value,
+                    brokerProjectionCatchupPassesCompleted,
+                    BrokerProjectionCatchupPassLimit,
                     initialAlertRefresh.GeneratedCount,
                     initialEventFeedRefresh.HasRebuilt,
                     initialEventFeedRefresh.EventCount,
                     initialSearchRefresh.HasRebuilt,
                     initialSearchRefresh.DocumentCount);
 
-                brokerProjectionCatchupCompleted = true;
+                brokerProjectionCatchupCompleted = brokerProjectionCatchupPassesCompleted >= BrokerProjectionCatchupPassLimit;
+                nextBrokerProjectionCatchupAtUtc = brokerProjectionCatchupCompleted
+                    ? null
+                    : DateTimeOffset.UtcNow.Add(BrokerProjectionCatchupPassDelay);
 
-                if (initialAlertRefresh.GeneratedCount > 0 || initialEventFeedRefresh.HasRebuilt || initialSearchRefresh.HasRebuilt)
+                if (initialAlertRefresh.GeneratedCount > 0 ||
+                    initialEventFeedRefresh.HasRebuilt ||
+                    initialSearchRefresh.HasRebuilt ||
+                    !brokerProjectionCatchupCompleted)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
                     continue;

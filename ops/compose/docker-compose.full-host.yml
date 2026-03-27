@@ -7,10 +7,31 @@ services:
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
       Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
       LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      hybrid-init:
+        condition: service_completed_successfully
 
   worker-lite:
     profiles:
       - dev-laptop
+
+  hybrid-init:
+    image: curlimages/curl:8.12.1
+    restart: "no"
+    environment:
+      ENABLE_OPENSEARCH: ${ENABLE_OPENSEARCH}
+      SEARCH__OPENSEARCH__BASEURL: ${SEARCH__OPENSEARCH__BASEURL}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      AI__OLLAMA__EMBEDDINGMODEL: ${AI__OLLAMA__EMBEDDINGMODEL}
+    volumes:
+      - ./hybrid-runtime-preflight.sh:/bootstrap/hybrid-runtime-preflight.sh:ro
+    command: /bin/sh /bootstrap/hybrid-runtime-preflight.sh
 
   worker-documents:
     image: ${LAWWATCHER_WORKER_DOCUMENTS_IMAGE}
@@ -75,6 +96,8 @@ services:
         condition: service_started
       ollama:
         condition: service_started
+      hybrid-init:
+        condition: service_completed_successfully
 
   worker-notifications:
     image: ${LAWWATCHER_WORKER_NOTIFICATIONS_IMAGE}

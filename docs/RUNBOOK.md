@@ -10,6 +10,7 @@ The supported operational contract is Docker-first and host-OS-neutral: raw `doc
 - `ai`: `ollama`, `worker-ai`
 - `full-host`: `api`, `portal`, `worker-projection`, `worker-notifications`, `worker-replay`, `worker-documents`, `sqlserver`, `rabbitmq`, `minio`, `ollama`
 - `opensearch`: optional add-on for `full-host`
+- when `ENABLE_OPENSEARCH=true`, Compose runs a one-shot `hybrid-init` preflight before `api` and `worker-projection`; it waits for `OpenSearch` and pulls the configured Ollama embedding model so `HybridVector` is computed truthfully on first boot
 
 Primary entrypoints:
 
@@ -42,6 +43,8 @@ Expected:
 - `GET /health/live` returns healthy for `api`, `worker-lite`, `worker-ai` when they are meant to be running
 - `GET /health/ready` returns healthy and includes dependency checks such as `sqlserver`, `rabbitmq` and `ollama` when applicable
 
+The shared Docker health and AI smoke helpers resolve the actual compose-published `ollama` host port before they probe `/api/tags`. Do not diagnose a health-smoke failure against a hard-coded `127.0.0.1:11434` assumption when the stack was started on random local ports.
+
 If a host is not ready:
 
 - read the matching `*-out.log` and `*-err.log` artifacts created by the smoke
@@ -71,6 +74,9 @@ Use it to answer:
 - is the host running `rabbitmq` delivery or primary `sql-poller`
 - which `message_type` rows are still pending or deferred in `outbox`
 - which `consumer_name` entries have processed inbox rows
+- which broker endpoints currently have ready or unacked messages
+- whether broker consumers are attached to the expected endpoint queues
+- whether fault or dead-letter queues are accumulating messages
 
 If `deliveryMode=rabbitmq` and `pollerMode=fallback`, broker consumers are the main path and SQL poll loops are only safety nets.
 
@@ -83,6 +89,9 @@ Before making changes, try the smallest supported smoke for the affected runtime
 - full-host runtime: `bash ops/run-docker-full-host-smoke.sh`
 - full-host with OpenSearch: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
 - MinIO-backed AI grounding: `ops/run-act-ai-grounding-minio-smoke.sh`
+- write-path nonblocking proof: `bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh`
+- retention proof: `bash ops/run-retention-smoke.sh`
+- structured-log proof: `bash ops/run-structured-log-proof.sh`
 - operator auth and admin CRUD: `ops/run-operator-admin-smoke.sh`
 - browser admin CRUD: `ops/run-operator-admin-browser-smoke.sh`
 
@@ -117,6 +126,7 @@ Actions:
 1. Restart the affected Docker profile so `rabbitmq` comes back through the supported runtime path.
 2. Re-run the smallest supported profile smoke for the affected flow.
 3. Confirm `/v1/system/messaging` now shows `published` outbox rows and matching `inbox` entries.
+4. In broker mode, also confirm the broker section no longer shows growing `readyCount`, `faultCount` or `deadLetterCount` for the affected endpoint.
 4. Only if the stack still looks inconsistent, restart the affected runtime profile again from the repo wrapper.
 
 Do not manually delete `outbox` or `inbox` rows.
@@ -127,6 +137,8 @@ Symptoms:
 
 - search, event feed, alerts or profile read model does not reflect recent writes
 - broker smoke for the same flow fails on projection assertions
+
+In broker mode, the projection loop already does bounded startup catch-up passes for alerts, event feed and search before it settles into steady-state broker-only processing. After a cold boot or redeploy, give that warm-up window a chance to finish before you treat an initially empty search result as a stuck projection.
 
 Actions:
 
@@ -170,6 +182,8 @@ Actions:
 ```bash
 bash ops/ensure-docker-ollama-model.sh llama3.2:1b
 ```
+
+If the runtime was started through a smoke wrapper on random local ports, prefer the repo helpers over manual `curl` calls to `127.0.0.1:11434`; the helpers already resolve the current compose-published `ollama` port.
 
 3. Re-run the smallest relevant proof:
 
@@ -219,6 +233,8 @@ Guidance:
 - use retention after diagnostics are captured, not before
 - do not use retention as a substitute for replay, backfill or broker recovery
 - `search_documents` cleanup is opt-in through `searchDocumentsRetentionHours`
+- terminal AI-task cleanup is opt-in through `aiTasksRetentionHours`
+- `documentArtifactsRetentionHours` is exposed truthfully but currently returns an explicit unsupported reason; do not treat it as a working source-document delete lane
 
 ### Restart Policy
 
@@ -261,6 +277,8 @@ When the issue is broker-related, include:
 - the expected `consumer_name`
 - whether `deliveryMode` was `rabbitmq` or `sql-poller`
 - whether `pollerMode` was `fallback` or primary
+- the affected broker `endpointName`
+- current broker `readyCount`, `unackedCount`, `faultCount` and `deadLetterCount`
 
 ## Things Not To Do
 

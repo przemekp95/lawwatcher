@@ -389,7 +389,9 @@ public static class LawWatcherV1Endpoints
                         request.PublishedOutboxRetentionHours,
                         request.ProcessedInboxRetentionHours,
                         request.EventFeedRetentionHours,
-                        request.SearchDocumentsRetentionHours),
+                        request.SearchDocumentsRetentionHours,
+                        request.AiTasksRetentionHours,
+                        request.DocumentArtifactsRetentionHours),
                     cancellationToken));
             }
             catch (ArgumentException exception)

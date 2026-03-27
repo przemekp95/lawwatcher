@@ -5,12 +5,14 @@ namespace LawWatcher.IntegrationApi.Application;
 
 public sealed class MessagingDiagnosticsQueryService(
     IMessagingDiagnosticsStore store,
+    IBrokerDiagnosticsStore brokerStore,
     bool sqlOutboxEnabled,
     bool brokerEnabled)
 {
     public async Task<MessagingDiagnosticsResponse> GetDiagnosticsAsync(CancellationToken cancellationToken)
     {
         var snapshot = await store.GetSnapshotAsync(cancellationToken);
+        var brokerSnapshot = await brokerStore.GetSnapshotAsync(cancellationToken);
         return new MessagingDiagnosticsResponse(
             brokerEnabled ? "rabbitmq" : sqlOutboxEnabled ? "sql-poller" : "inline",
             brokerEnabled ? "fallback" : sqlOutboxEnabled ? "primary" : "disabled",
@@ -43,6 +45,29 @@ public sealed class MessagingDiagnosticsQueryService(
                         consumer.ConsumerName,
                         consumer.ProcessedCount,
                         consumer.LastProcessedAtUtc))
+                    .ToArray()),
+            new MessagingBrokerResponse(
+                brokerSnapshot.IsAvailable,
+                brokerSnapshot.QueueCount,
+                brokerSnapshot.ConsumerCount,
+                brokerSnapshot.MessageCount,
+                brokerSnapshot.ReadyCount,
+                brokerSnapshot.UnackedCount,
+                brokerSnapshot.FaultCount,
+                brokerSnapshot.DeadLetterCount,
+                brokerSnapshot.RedeliveryCount,
+                brokerSnapshot.Endpoints
+                    .Select(endpoint => new MessagingBrokerEndpointResponse(
+                        endpoint.EndpointName,
+                        endpoint.QueueName,
+                        endpoint.Status,
+                        endpoint.ConsumerCount,
+                        endpoint.MessageCount,
+                        endpoint.ReadyCount,
+                        endpoint.UnackedCount,
+                        endpoint.FaultCount,
+                        endpoint.DeadLetterCount,
+                        endpoint.RedeliveryCount))
                     .ToArray()));
     }
 }

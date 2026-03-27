@@ -131,12 +131,81 @@ wait_notification_dispatch_for_recipient() {
   exit 1
 }
 
+wait_compose_logs_match() {
+  local pattern="$1"
+  local attempts="${2:-60}"
+  shift 2
+
+  local compose_args=()
+  while (($# > 0)); do
+    if [[ "$1" == "--" ]]; then
+      shift
+      break
+    fi
+    compose_args+=("$1")
+    shift
+  done
+  local services=("$@")
+  local logs=""
+
+  if ((${#compose_args[@]} == 0)); then
+    echo "wait_compose_logs_match requires docker compose arguments before '--'." >&2
+    exit 1
+  fi
+
+  for ((attempt=0; attempt<attempts; attempt++)); do
+    if ((${#services[@]} > 0)); then
+      logs="$(docker "${compose_args[@]}" logs --no-color "${services[@]}" 2>&1 || true)"
+    else
+      logs="$(docker "${compose_args[@]}" logs --no-color 2>&1 || true)"
+    fi
+
+    if printf '%s' "$logs" | grep -Eq "$pattern"; then
+      printf '%s' "$logs"
+      return 0
+    fi
+
+    sleep 2
+  done
+
+  echo "Compose logs did not contain the expected pattern: $pattern" >&2
+  printf '%s\n' "$logs" >&2
+  exit 1
+}
+
+resolve_compose_published_port() {
+  local service_name="$1"
+  local container_port="$2"
+  shift 2
+  local compose_args=("$@")
+  local mapping=""
+  local published_port=""
+
+  for ((attempt=0; attempt<30; attempt++)); do
+    mapping="$(docker "${compose_args[@]}" port "${service_name}" "${container_port}" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+    if [[ -n "${mapping}" ]]; then
+      published_port="${mapping##*:}"
+      if [[ "${published_port}" =~ ^[0-9]+$ ]]; then
+        printf '%s' "${published_port}"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+
+  echo "Unable to resolve published port for ${service_name}:${container_port}" >&2
+  exit 1
+}
+
 ensure_docker_ollama_model() {
   local model="$1"
   shift
   local compose_args=("$@")
+  local ollama_host_port
 
-  wait_http_ok "http://127.0.0.1:11434/api/tags" 120 >/dev/null
+  ollama_host_port="$(resolve_compose_published_port ollama 11434/tcp "${compose_args[@]}")"
+
+  wait_http_ok "http://127.0.0.1:${ollama_host_port}/api/tags" 120 >/dev/null
 
   if docker "${compose_args[@]}" exec -T ollama ollama list | grep -Fq "$model"; then
     return 0

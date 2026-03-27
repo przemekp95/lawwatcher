@@ -47,3 +47,20 @@ jobs:
 
       - name: Full-host OpenSearch smoke
         run: bash ops/run-docker-full-host-smoke.sh --build-local --include-opensearch
+
+  ops_proofs_linux:
+    if: github.event_name == 'workflow_dispatch'
+    needs: docker_contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: RabbitMQ write-path nonblocking smoke
+        run: bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh --build-local
+
+      - name: Retention smoke
+        run: bash ops/run-retention-smoke.sh --build-local
+
+      - name: Structured-log proof
+        run: bash ops/run-structured-log-proof.sh --build-local

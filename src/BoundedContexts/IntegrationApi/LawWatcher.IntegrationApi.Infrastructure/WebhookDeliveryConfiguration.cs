@@ -1,4 +1,5 @@
 using LawWatcher.BuildingBlocks.Ports;
+using Microsoft.Extensions.Logging;
 
 namespace LawWatcher.IntegrationApi.Infrastructure;
 
@@ -33,7 +34,7 @@ public static class WebhookDispatcherRuntimeResolver
 
 public static class WebhookDispatcherRuntimeFactory
 {
-    public static IWebhookDispatcher Create(WebhookDeliveryOptions options)
+    public static IWebhookDispatcher Create(WebhookDeliveryOptions options, ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -44,7 +45,9 @@ public static class WebhookDispatcherRuntimeFactory
                 {
                     Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds))
                 },
-                options),
+                options,
+                loggerFactory?.CreateLogger<SignedHttpWebhookDispatcher>()
+                    ?? LoggerFactory.Create(logging => { }).CreateLogger<SignedHttpWebhookDispatcher>()),
             _ => new InMemoryWebhookDispatcher()
         };
     }

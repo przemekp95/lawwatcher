@@ -39,6 +39,7 @@ using LawWatcher.TaxonomyAndProfiles.Contracts;
 using LawWatcher.TaxonomyAndProfiles.Domain.MonitoringProfiles;
 using LawWatcher.TaxonomyAndProfiles.Domain.Subscriptions;
 using LawWatcher.TaxonomyAndProfiles.Infrastructure;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -179,6 +180,41 @@ var messagingDiagnosticsQueryService = new MessagingDiagnosticsQueryService(
                     new InboxConsumerDiagnosticsSnapshot("worker-lite.replay-requested", 2, new DateTimeOffset(2026, 03, 27, 10, 5, 0, TimeSpan.Zero)),
                     new InboxConsumerDiagnosticsSnapshot("worker-lite.backfill-requested", 1, new DateTimeOffset(2026, 03, 27, 10, 7, 0, TimeSpan.Zero))
                 ]))),
+    new StubBrokerDiagnosticsStore(
+        new BrokerDiagnosticsSnapshot(
+            true,
+            4,
+            2,
+            3,
+            2,
+            1,
+            1,
+            0,
+            2,
+            [
+                new BrokerEndpointDiagnosticsSnapshot(
+                    "ai-enrichment-requested",
+                    "ai-enrichment-requested",
+                    "running",
+                    1,
+                    2,
+                    1,
+                    1,
+                    0,
+                    0,
+                    1),
+                new BrokerEndpointDiagnosticsSnapshot(
+                    "replay-requested",
+                    "replay-requested",
+                    "running",
+                    1,
+                    1,
+                    1,
+                    0,
+                    1,
+                    0,
+                    1)
+            ])),
     sqlOutboxEnabled: true,
     brokerEnabled: true);
 var messagingDiagnostics = await messagingDiagnosticsQueryService.GetDiagnosticsAsync(CancellationToken.None);
@@ -189,6 +225,11 @@ Expect.True(messagingDiagnostics.DiagnosticsAvailable, "Messaging diagnostics qu
 Expect.Equal(1, messagingDiagnostics.Outbox.DeferredCount, "Messaging diagnostics query service should map deferred outbox counts into the response contract.", failures);
 Expect.Equal(2, messagingDiagnostics.Outbox.MessageTypes.Count, "Messaging diagnostics query service should expose grouped per-message-type outbox diagnostics.", failures);
 Expect.Equal("worker-lite.replay-requested", messagingDiagnostics.Inbox.Consumers.First().ConsumerName, "Messaging diagnostics query service should preserve inbox consumer names in the response contract.", failures);
+Expect.True(messagingDiagnostics.Broker.DiagnosticsAvailable, "Messaging diagnostics query service should expose broker telemetry availability when the broker diagnostics adapter is configured.", failures);
+Expect.Equal(1, messagingDiagnostics.Broker.FaultCount, "Messaging diagnostics query service should expose broker fault queue counts in the response contract.", failures);
+Expect.Equal(2L, messagingDiagnostics.Broker.RedeliveryCount, "Messaging diagnostics query service should aggregate broker redelivery counts in the response contract.", failures);
+Expect.Equal("ai-enrichment-requested", messagingDiagnostics.Broker.Endpoints.First().EndpointName, "Messaging diagnostics query service should preserve broker endpoint names in the response contract.", failures);
+Expect.Equal("running", messagingDiagnostics.Broker.Endpoints.First().Status, "Messaging diagnostics query service should preserve broker consumer status in the response contract.", failures);
 
 var retentionMaintenanceCommandService = new RetentionMaintenanceCommandService(
     new StubRetentionMaintenanceStore(
@@ -204,13 +245,23 @@ var retentionMaintenanceCommandService = new RetentionMaintenanceCommandService(
             new DateTimeOffset(2026, 02, 27, 11, 0, 0, TimeSpan.Zero),
             9,
             true,
-            "search_documents older than the requested retention window were pruned by indexed_at_utc.")));
+            "search_documents older than the requested retention window were pruned by indexed_at_utc.",
+            new DateTimeOffset(2026, 03, 06, 11, 0, 0, TimeSpan.Zero),
+            4,
+            true,
+            "completed and failed ai_enrichment_tasks older than the requested retention window were pruned by terminal timestamps.",
+            new DateTimeOffset(2026, 03, 01, 11, 0, 0, TimeSpan.Zero),
+            0,
+            false,
+            "Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.")));
 var retentionMaintenance = await retentionMaintenanceCommandService.RunAsync(
     new RunRetentionMaintenanceCommand(
         168,
         336,
         720,
-        672)
+        672,
+        504,
+        336)
     {
         RequestedAtUtc = new DateTimeOffset(2026, 03, 27, 11, 0, 0, TimeSpan.Zero)
     },
@@ -224,6 +275,14 @@ Expect.Equal(new DateTimeOffset(2026, 02, 27, 11, 0, 0, TimeSpan.Zero), retentio
 Expect.Equal(9, retentionMaintenance.DeletedSearchDocumentsCount, "Retention maintenance command service should map deleted search-document rows into the response contract.", failures);
 Expect.True(retentionMaintenance.SearchDocumentsRetentionApplied, "Retention maintenance command service should report when search-document retention was applied.", failures);
 Expect.Equal("search_documents older than the requested retention window were pruned by indexed_at_utc.", retentionMaintenance.SearchDocumentsRetentionReason, "Retention maintenance command service should preserve the explicit search-document retention reason.", failures);
+Expect.Equal(new DateTimeOffset(2026, 03, 06, 11, 0, 0, TimeSpan.Zero), retentionMaintenance.AiTasksCutoffUtc ?? DateTimeOffset.MinValue, "Retention maintenance command service should map the AI-task retention cutoff into the response contract.", failures);
+Expect.Equal(4, retentionMaintenance.DeletedAiTasksCount, "Retention maintenance command service should map deleted AI-task rows into the response contract.", failures);
+Expect.True(retentionMaintenance.AiTasksRetentionApplied, "Retention maintenance command service should report when AI-task retention was applied.", failures);
+Expect.Equal("completed and failed ai_enrichment_tasks older than the requested retention window were pruned by terminal timestamps.", retentionMaintenance.AiTasksRetentionReason, "Retention maintenance command service should preserve the explicit AI-task retention reason.", failures);
+Expect.Equal(new DateTimeOffset(2026, 03, 01, 11, 0, 0, TimeSpan.Zero), retentionMaintenance.DocumentArtifactsCutoffUtc ?? DateTimeOffset.MinValue, "Retention maintenance command service should map the requested document-artifact retention cutoff into the response contract even when cleanup is unavailable.", failures);
+Expect.Equal(0, retentionMaintenance.DeletedDocumentArtifactsCount, "Retention maintenance command service should preserve deleted document-artifact counts in the response contract.", failures);
+Expect.False(retentionMaintenance.DocumentArtifactsRetentionApplied, "Retention maintenance command service should report when document-artifact retention could not be applied safely.", failures);
+Expect.Equal("Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.", retentionMaintenance.DocumentArtifactsRetentionReason, "Retention maintenance command service should preserve the explicit document-artifact retention reason.", failures);
 
 var ollamaLlmHandler = new StubSequenceHttpMessageHandler(request =>
 {
@@ -2300,7 +2359,8 @@ var signedWebhookDispatcher = new SignedHttpWebhookDispatcher(
         Backend = "SignedHttp",
         SigningSecret = "spec-secret",
         TimeoutSeconds = 5
-    });
+    },
+    NullLogger<SignedHttpWebhookDispatcher>.Instance);
 await signedWebhookDispatcher.DispatchAsync(new WebhookDispatchRequest(
     "http://127.0.0.1:5310/hooks/alerts",
     "alert.created",
@@ -2620,6 +2680,17 @@ internal sealed class StubMessagingDiagnosticsStore(MessagingDiagnosticsSnapshot
     public bool IsAvailable => snapshot.IsAvailable;
 
     public Task<MessagingDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(snapshot);
+    }
+}
+
+internal sealed class StubBrokerDiagnosticsStore(BrokerDiagnosticsSnapshot snapshot) : IBrokerDiagnosticsStore
+{
+    public bool IsAvailable => snapshot.IsAvailable;
+
+    public Task<BrokerDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(snapshot);
