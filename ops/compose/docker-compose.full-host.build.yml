@@ -1,0 +1,32 @@
+services:
+  worker-documents:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Documents/LawWatcher.Worker.Documents.csproj
+        APP_DLL: LawWatcher.Worker.Documents.dll
+
+  worker-projection:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Projection/LawWatcher.Worker.Projection.csproj
+        APP_DLL: LawWatcher.Worker.Projection.dll
+
+  worker-notifications:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Notifications/LawWatcher.Worker.Notifications.csproj
+        APP_DLL: LawWatcher.Worker.Notifications.dll
+
+  worker-replay:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Replay/LawWatcher.Worker.Replay.csproj
+        APP_DLL: LawWatcher.Worker.Replay.dll

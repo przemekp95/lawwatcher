@@ -1,0 +1,159 @@
+name: lawwatcher
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
+      MSSQL_AGENT_ENABLED: "true"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${SQLSERVER_HOST_PORT:-1433}:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+
+  sql-init:
+    image: mcr.microsoft.com/mssql-tools:latest
+    environment:
+      SQLSERVER_HOST: sqlserver
+      SQLSERVER_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
+      SQLSERVER_DATABASE: ${SQLSERVER_DATABASE:-LawWatcher}
+    depends_on:
+      - sqlserver
+    volumes:
+      - ../sql/sqlserver:/bootstrap/sql:ro
+      - ./apply-sqlserver-scripts.sh:/bootstrap/apply-sqlserver-scripts.sh:ro
+    command: /bin/bash /bootstrap/apply-sqlserver-scripts.sh
+    restart: "no"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  minio:
+    image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+
+  api:
+    image: ${LAWWATCHER_API_IMAGE}
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Storage__Provider: sqlserver
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      SEARCH__BACKEND: ${SEARCH__BACKEND}
+      Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
+      Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
+      AI__MODE: ${AI__MODE}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
+      LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
+    ports:
+      - "${API_HOST_PORT:-8080}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  portal:
+    image: ${LAWWATCHER_PORTAL_IMAGE}
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      BACKEND__API_BASEURL: ${BACKEND__API_BASEURL}
+    ports:
+      - "${PORTAL_HOST_PORT:-8081}:8080"
+    depends_on:
+      - api
+
+  worker-lite:
+    image: ${LAWWATCHER_WORKER_LITE_IMAGE}
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Storage__Provider: sqlserver
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      SEARCH__BACKEND: ${SEARCH__BACKEND}
+      Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
+      Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
+      LawWatcher__WorkerLite__MaxConcurrency: ${WORKERS__LITE__MAXCONCURRENCY}
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles:
+      - ai
+      - full-host
+    environment:
+      OLLAMA_HOST: ${AI__OLLAMA__HOST:-0.0.0.0:11434}
+      OLLAMA_KEEP_ALIVE: ${AI__OLLAMA__KEEPALIVE}
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  worker-ai:
+    image: ${LAWWATCHER_WORKER_AI_IMAGE}
+    profiles:
+      - ai
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Storage__Provider: sqlserver
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      AI__MODE: ${AI__MODE}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
+      LawWatcher__LocalLlmWorker__MaxConcurrency: ${WORKERS__AI__MAXCONCURRENCY}
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      ollama:
+        condition: service_started
+
+volumes:
+  sqlserver-data:
+  rabbitmq-data:
+  minio-data:
+  ollama-data:

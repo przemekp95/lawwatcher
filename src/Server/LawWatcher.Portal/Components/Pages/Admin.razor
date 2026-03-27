@@ -1,0 +1,1150 @@
+@page "/admin"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject LawWatcherPortalAdminClient AdminClient
+
+<PageTitle>Admin</PageTitle>
+
+<section class="portal-shell">
+    <div class="hero-panel">
+        <p class="eyebrow">Operator admin</p>
+        <h1>Secure admin writes across the internal control surface</h1>
+        <p class="lede">
+            This page signs into the internal API through the operator cookie flow and then performs antiforgery-protected admin commands for operators, monitoring profiles, subscriptions, webhooks and API clients.
+        </p>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_successMessage))
+    {
+        <section class="flash-banner flash-banner-success">
+            <strong>Success:</strong> @_successMessage
+        </section>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <section class="flash-banner flash-banner-error">
+            <strong>Attention:</strong> @_errorMessage
+        </section>
+    }
+
+    <section class="section-card">
+        <div class="section-heading">
+            <div>
+                <p class="section-kicker">Session</p>
+                <h2>Operator access</h2>
+            </div>
+            <span class="status-pill">@(_session.IsAuthenticated ? "signed in" : "anonymous")</span>
+        </div>
+
+        @if (!_session.IsAuthenticated)
+        {
+            <form class="admin-form-grid" @onsubmit="HandleLoginAsync" @onsubmit:preventDefault>
+                <div class="field-stack">
+                    <label for="operator-email">Email</label>
+                    <input id="operator-email" class="portal-input" @bind="_login.Email" />
+                </div>
+                <div class="field-stack">
+                    <label for="operator-password">Password</label>
+                    <input id="operator-password" class="portal-input" type="password" @bind="_login.Password" />
+                </div>
+                <div class="button-row">
+                    <button type="submit" class="portal-button" disabled="@_busy">Sign in</button>
+                </div>
+            </form>
+        }
+        else
+        {
+            <div class="auth-summary">
+                <div>
+                    <strong>@_session.DisplayName</strong>
+                    <p>@_session.Email</p>
+                </div>
+                <div class="capability-strip">
+                    @foreach (var permission in _session.Permissions)
+                    {
+                        <span class="status-pill">@permission</span>
+                    }
+                </div>
+            </div>
+            <div class="button-row">
+                <button type="button" class="portal-button portal-button-secondary" @onclick="RefreshAsync" disabled="@_busy">Refresh</button>
+                <button type="button" class="portal-button portal-button-danger" @onclick="HandleLogoutAsync" disabled="@_busy">Sign out</button>
+            </div>
+        }
+    </section>
+
+    @if (_session.IsAuthenticated)
+    {
+        <section class="admin-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Operators</p>
+                        <h2>Create operator</h2>
+                    </div>
+                    <span class="status-pill">@_operators.Count operator(s)</span>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleCreateOperatorAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="operator-create-email">Email</label>
+                        <input id="operator-create-email" class="portal-input" @bind="_operatorCreate.Email" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="operator-create-display">Display name</label>
+                        <input id="operator-create-display" class="portal-input" @bind="_operatorCreate.DisplayName" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="operator-create-password">Password</label>
+                        <input id="operator-create-password" class="portal-input" type="password" @bind="_operatorCreate.Password" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="operator-create-permissions">Permissions</label>
+                        <input id="operator-create-permissions" class="portal-input" @bind="_operatorCreate.PermissionsCsv" placeholder="operators:write, profiles:write" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Create operator</button>
+                    </div>
+                </form>
+
+                <div class="admin-list">
+                    @foreach (var operatorAccount in _operators)
+                    {
+                        <article class="admin-item-card">
+                            <div class="admin-item-heading">
+                                <strong>@operatorAccount.DisplayName</strong>
+                                <span class="status-pill">@(operatorAccount.IsActive ? "active" : "inactive")</span>
+                            </div>
+                            <p>@operatorAccount.Email</p>
+                            <p class="admin-muted">@string.Join(", ", operatorAccount.Permissions)</p>
+                            <div class="button-row admin-top-gap">
+                                <button
+                                    type="button"
+                                    class="portal-button portal-button-danger"
+                                    @onclick="() => HandleDeactivateOperatorAsync(operatorAccount.Id)"
+                                    disabled="@(_busy || !operatorAccount.IsActive || operatorAccount.Id == _session.OperatorId)">
+                                    Deactivate
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Operators</p>
+                        <h2>Update or reset operator</h2>
+                    </div>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleUpdateOperatorAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="operator-update-target">Operator</label>
+                        <select id="operator-update-target" class="portal-select" @bind="_operatorUpdate.OperatorId">
+                            <option value="">Choose operator</option>
+                            @foreach (var operatorAccount in _operators)
+                            {
+                                <option value="@operatorAccount.Id">@operatorAccount.Email</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="operator-update-display">Display name</label>
+                        <input id="operator-update-display" class="portal-input" @bind="_operatorUpdate.DisplayName" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="operator-update-permissions">Permissions</label>
+                        <input id="operator-update-permissions" class="portal-input" @bind="_operatorUpdate.PermissionsCsv" placeholder="operators:write, profiles:write" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Update operator</button>
+                    </div>
+                </form>
+
+                <form class="admin-form-grid admin-top-gap" @onsubmit="HandleResetOperatorPasswordAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="operator-reset-target">Operator</label>
+                        <select id="operator-reset-target" class="portal-select" @bind="_operatorReset.OperatorId">
+                            <option value="">Choose operator</option>
+                            @foreach (var operatorAccount in _operators)
+                            {
+                                <option value="@operatorAccount.Id">@operatorAccount.Email</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="operator-reset-password">New password</label>
+                        <input id="operator-reset-password" class="portal-input" type="password" @bind="_operatorReset.NewPassword" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Reset password</button>
+                    </div>
+                </form>
+            </article>
+        </section>
+
+        <section class="admin-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Monitoring</p>
+                        <h2>Create profile</h2>
+                    </div>
+                    <span class="status-pill">@_profiles.Count profile(s)</span>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleCreateProfileAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="profile-name">Name</label>
+                        <input id="profile-name" class="portal-input" @bind="_profileCreate.Name" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="profile-policy">Alert policy</label>
+                        <select id="profile-policy" class="portal-select" @bind="_profileCreate.AlertPolicy">
+                            <option value="immediate">immediate</option>
+                            <option value="digest">digest</option>
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="profile-digest">Digest interval minutes</label>
+                        <input id="profile-digest" class="portal-input" @bind="_profileCreate.DigestIntervalMinutes" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="profile-keywords">Keywords</label>
+                        <input id="profile-keywords" class="portal-input" @bind="_profileCreate.KeywordsCsv" placeholder="vat, cit, akcyza" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Create profile</button>
+                    </div>
+                </form>
+
+                <div class="admin-list">
+                    @foreach (var profile in _profiles)
+                    {
+                        <article class="admin-item-card">
+                            <div class="admin-item-heading">
+                                <strong>@profile.Name</strong>
+                                <span class="status-pill">@profile.AlertPolicy</span>
+                            </div>
+                            <p>@string.Join(", ", profile.Keywords)</p>
+                            <p class="admin-muted">@profile.RuleCount rule(s)</p>
+                            <div class="button-row admin-top-gap">
+                                <button
+                                    type="button"
+                                    class="portal-button portal-button-danger"
+                                    @onclick="() => HandleDeactivateProfileAsync(profile.Id)"
+                                    disabled="@_busy">
+                                    Deactivate
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Monitoring</p>
+                        <h2>Update profile</h2>
+                    </div>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleAddProfileRuleAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="profile-rule-target">Profile</label>
+                        <select id="profile-rule-target" class="portal-select" @bind="_profileRule.ProfileId">
+                            <option value="">Choose profile</option>
+                            @foreach (var profile in _profiles)
+                            {
+                                <option value="@profile.Id">@profile.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="profile-rule-keyword">Keyword</label>
+                        <input id="profile-rule-keyword" class="portal-input" @bind="_profileRule.Keyword" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Add rule</button>
+                    </div>
+                </form>
+
+                <form class="admin-form-grid admin-top-gap" @onsubmit="HandleChangeProfilePolicyAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="profile-policy-target">Profile</label>
+                        <select id="profile-policy-target" class="portal-select" @bind="_profilePolicy.ProfileId">
+                            <option value="">Choose profile</option>
+                            @foreach (var profile in _profiles)
+                            {
+                                <option value="@profile.Id">@profile.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="profile-policy-value">Alert policy</label>
+                        <select id="profile-policy-value" class="portal-select" @bind="_profilePolicy.AlertPolicy">
+                            <option value="immediate">immediate</option>
+                            <option value="digest">digest</option>
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="profile-policy-digest">Digest interval minutes</label>
+                        <input id="profile-policy-digest" class="portal-input" @bind="_profilePolicy.DigestIntervalMinutes" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Change policy</button>
+                    </div>
+                </form>
+            </article>
+        </section>
+
+        <section class="admin-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Subscriptions</p>
+                        <h2>Create subscription</h2>
+                    </div>
+                    <span class="status-pill">@_subscriptions.Count subscription(s)</span>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleCreateSubscriptionAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="subscription-profile">Profile</label>
+                        <select id="subscription-profile" class="portal-select" @bind="_subscriptionCreate.ProfileId">
+                            <option value="">Choose profile</option>
+                            @foreach (var profile in _profiles)
+                            {
+                                <option value="@profile.Id">@profile.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-subscriber">Subscriber</label>
+                        <input id="subscription-subscriber" class="portal-input" @bind="_subscriptionCreate.Subscriber" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-channel">Channel</label>
+                        <select id="subscription-channel" class="portal-select" @bind="_subscriptionCreate.Channel">
+                            <option value="email">email</option>
+                            <option value="webhook">webhook</option>
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-policy">Alert policy</label>
+                        <select id="subscription-policy" class="portal-select" @bind="_subscriptionCreate.AlertPolicy">
+                            <option value="immediate">immediate</option>
+                            <option value="digest">digest</option>
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-digest">Digest interval minutes</label>
+                        <input id="subscription-digest" class="portal-input" @bind="_subscriptionCreate.DigestIntervalMinutes" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Create subscription</button>
+                    </div>
+                </form>
+
+                <div class="admin-list">
+                    @foreach (var subscription in _subscriptions)
+                    {
+                        <article class="admin-item-card">
+                            <div class="admin-item-heading">
+                                <strong>@subscription.ProfileName</strong>
+                                <span class="status-pill">@subscription.Channel</span>
+                            </div>
+                            <p>@subscription.Subscriber</p>
+                            <p class="admin-muted">@subscription.AlertPolicy @(subscription.DigestIntervalMinutes is null ? string.Empty : $"- {subscription.DigestIntervalMinutes} min")</p>
+                            <div class="button-row admin-top-gap">
+                                <button
+                                    type="button"
+                                    class="portal-button portal-button-danger"
+                                    @onclick="() => HandleDeactivateSubscriptionAsync(subscription.Id)"
+                                    disabled="@_busy">
+                                    Deactivate
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Subscriptions</p>
+                        <h2>Update subscription policy</h2>
+                    </div>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleChangeSubscriptionPolicyAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="subscription-target">Subscription</label>
+                        <select id="subscription-target" class="portal-select" @bind="_subscriptionPolicy.SubscriptionId">
+                            <option value="">Choose subscription</option>
+                            @foreach (var subscription in _subscriptions)
+                            {
+                                <option value="@subscription.Id">@subscription.ProfileName - @subscription.Subscriber</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-policy-value">Alert policy</label>
+                        <select id="subscription-policy-value" class="portal-select" @bind="_subscriptionPolicy.AlertPolicy">
+                            <option value="immediate">immediate</option>
+                            <option value="digest">digest</option>
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="subscription-policy-digest">Digest interval minutes</label>
+                        <input id="subscription-policy-digest" class="portal-input" @bind="_subscriptionPolicy.DigestIntervalMinutes" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Change subscription policy</button>
+                    </div>
+                </form>
+            </article>
+        </section>
+
+        <section class="admin-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Integrations</p>
+                        <h2>Webhooks</h2>
+                    </div>
+                    <span class="status-pill">@_webhooks.Count webhook(s)</span>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleCreateWebhookAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="webhook-name">Name</label>
+                        <input id="webhook-name" class="portal-input" @bind="_webhookCreate.Name" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="webhook-url">Callback URL</label>
+                        <input id="webhook-url" class="portal-input" @bind="_webhookCreate.CallbackUrl" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="webhook-events">Event types</label>
+                        <input id="webhook-events" class="portal-input" @bind="_webhookCreate.EventTypesCsv" placeholder="alert.created" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Create webhook</button>
+                    </div>
+                </form>
+
+                <div class="admin-list">
+                    @foreach (var webhook in _webhooks)
+                    {
+                        <article class="admin-item-card">
+                            <div class="admin-item-heading">
+                                <strong>@webhook.Name</strong>
+                                <span class="status-pill">@(webhook.IsActive ? "active" : "inactive")</span>
+                            </div>
+                            <p>@webhook.CallbackUrl</p>
+                            <p class="admin-muted">@string.Join(", ", webhook.EventTypes)</p>
+                            <div class="button-row admin-top-gap">
+                                <button
+                                    type="button"
+                                    class="portal-button portal-button-danger"
+                                    @onclick="() => HandleDeactivateWebhookAsync(webhook.Id)"
+                                    disabled="@(_busy || !webhook.IsActive)">
+                                    Deactivate
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Integrations</p>
+                        <h2>API clients</h2>
+                    </div>
+                    <span class="status-pill">@_apiClients.Count client(s)</span>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleCreateApiClientAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="api-client-name">Name</label>
+                        <input id="api-client-name" class="portal-input" @bind="_apiClientCreate.Name" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="api-client-identifier">Client identifier</label>
+                        <input id="api-client-identifier" class="portal-input" @bind="_apiClientCreate.ClientIdentifier" />
+                    </div>
+                    <div class="field-stack">
+                        <label for="api-client-token">Token</label>
+                        <input id="api-client-token" class="portal-input" @bind="_apiClientCreate.Token" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="api-client-scopes">Scopes</label>
+                        <input id="api-client-scopes" class="portal-input" @bind="_apiClientCreate.ScopesCsv" placeholder="profiles:write, subscriptions:write" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button" disabled="@_busy">Create API client</button>
+                    </div>
+                </form>
+
+                <div class="admin-list">
+                    @foreach (var apiClient in _apiClients)
+                    {
+                        <article class="admin-item-card">
+                            <div class="admin-item-heading">
+                                <strong>@apiClient.Name</strong>
+                                <span class="status-pill">@(apiClient.IsActive ? "active" : "inactive")</span>
+                            </div>
+                            <p>@apiClient.ClientIdentifier</p>
+                            <p class="admin-muted">Fingerprint: @apiClient.TokenFingerprint</p>
+                            <p class="admin-muted">@string.Join(", ", apiClient.Scopes)</p>
+                            <div class="button-row admin-top-gap">
+                                <button
+                                    type="button"
+                                    class="portal-button portal-button-danger"
+                                    @onclick="() => HandleDeactivateApiClientAsync(apiClient.Id)"
+                                    disabled="@(_busy || !apiClient.IsActive)">
+                                    Deactivate
+                                </button>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </article>
+        </section>
+
+        <section class="admin-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Integrations</p>
+                        <h2>Update webhook</h2>
+                    </div>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleUpdateWebhookAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="webhook-update-target">Webhook</label>
+                        <select id="webhook-update-target" class="portal-select" @bind="_webhookUpdate.WebhookId">
+                            <option value="">Choose webhook</option>
+                            @foreach (var webhook in _webhooks)
+                            {
+                                <option value="@webhook.Id">@webhook.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="webhook-update-name">Name</label>
+                        <input id="webhook-update-name" class="portal-input" @bind="_webhookUpdate.Name" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="webhook-update-url">Callback URL</label>
+                        <input id="webhook-update-url" class="portal-input" @bind="_webhookUpdate.CallbackUrl" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="webhook-update-events">Event types</label>
+                        <input id="webhook-update-events" class="portal-input" @bind="_webhookUpdate.EventTypesCsv" placeholder="alert.created, bill.imported" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Update webhook</button>
+                    </div>
+                </form>
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Integrations</p>
+                        <h2>Update API client</h2>
+                    </div>
+                </div>
+
+                <form class="admin-form-grid" @onsubmit="HandleUpdateApiClientAsync" @onsubmit:preventDefault>
+                    <div class="field-stack">
+                        <label for="api-client-update-target">API client</label>
+                        <select id="api-client-update-target" class="portal-select" @bind="_apiClientUpdate.ApiClientId">
+                            <option value="">Choose API client</option>
+                            @foreach (var apiClient in _apiClients)
+                            {
+                                <option value="@apiClient.Id">@apiClient.ClientIdentifier</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="field-stack">
+                        <label for="api-client-update-name">Name</label>
+                        <input id="api-client-update-name" class="portal-input" @bind="_apiClientUpdate.Name" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="api-client-update-scopes">Scopes</label>
+                        <input id="api-client-update-scopes" class="portal-input" @bind="_apiClientUpdate.ScopesCsv" placeholder="profiles:write, webhooks:write" />
+                    </div>
+                    <div class="field-stack admin-span-full">
+                        <label for="api-client-update-token">New token</label>
+                        <input id="api-client-update-token" class="portal-input" @bind="_apiClientUpdate.Token" placeholder="leave blank to keep current token" />
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="portal-button portal-button-secondary" disabled="@_busy">Update API client</button>
+                    </div>
+                </form>
+            </article>
+        </section>
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource _loadCancellation = new();
+
+    private OperatorSessionResponse _session = new(false, null, null, null, Array.Empty<string>(), string.Empty);
+    private List<OperatorAccountResponse> _operators = [];
+    private List<MonitoringProfileResponse> _profiles = [];
+    private List<ProfileSubscriptionResponse> _subscriptions = [];
+    private List<WebhookRegistrationResponse> _webhooks = [];
+    private List<ApiClientResponse> _apiClients = [];
+
+    private LoginInput _login = new();
+    private OperatorCreateInput _operatorCreate = new();
+    private OperatorUpdateInput _operatorUpdate = new();
+    private OperatorResetInput _operatorReset = new();
+    private ProfileCreateInput _profileCreate = new();
+    private ProfileRuleInput _profileRule = new();
+    private ProfilePolicyInput _profilePolicy = new();
+    private SubscriptionCreateInput _subscriptionCreate = new();
+    private SubscriptionPolicyInput _subscriptionPolicy = new();
+    private WebhookCreateInput _webhookCreate = new();
+    private WebhookUpdateInput _webhookUpdate = new();
+    private ApiClientCreateInput _apiClientCreate = new();
+    private ApiClientUpdateInput _apiClientUpdate = new();
+
+    private string? _successMessage;
+    private string? _errorMessage;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    public void Dispose()
+    {
+        _loadCancellation.Cancel();
+        _loadCancellation.Dispose();
+    }
+
+    private async Task RefreshAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            _session = await AdminClient.GetSessionAsync(_loadCancellation.Token);
+            if (_session.IsAuthenticated)
+            {
+                await LoadDataAsync();
+            }
+            else
+            {
+                _operators = [];
+                _profiles = [];
+                _subscriptions = [];
+                _webhooks = [];
+                _apiClients = [];
+            }
+        }, clearSuccess: false);
+    }
+
+    private async Task HandleLoginAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            _session = await AdminClient.LoginAsync(_login.Email, _login.Password, _loadCancellation.Token);
+            _login = new LoginInput();
+            await LoadDataAsync();
+            SetSuccess("Operator session established.");
+        });
+    }
+
+    private async Task HandleLogoutAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            _session = await AdminClient.LogoutAsync(_loadCancellation.Token);
+            _operators = [];
+            _profiles = [];
+            _subscriptions = [];
+            _webhooks = [];
+            _apiClients = [];
+            SetSuccess("Operator session closed.");
+        });
+    }
+
+    private async Task HandleCreateOperatorAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.CreateOperatorAsync(
+                new CreateOperatorAccountRequest(
+                    _operatorCreate.Email,
+                    _operatorCreate.DisplayName,
+                    _operatorCreate.Password,
+                    ParseCsv(_operatorCreate.PermissionsCsv)),
+                _loadCancellation.Token);
+
+            _operatorCreate = new OperatorCreateInput();
+            await LoadDataAsync();
+            SetSuccess("Operator account created.");
+        });
+    }
+
+    private async Task HandleUpdateOperatorAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.UpdateOperatorAsync(
+                ParseRequiredGuid(_operatorUpdate.OperatorId, "Operator"),
+                new UpdateOperatorAccountRequest(
+                    _operatorUpdate.DisplayName,
+                    ParseCsv(_operatorUpdate.PermissionsCsv)),
+                _loadCancellation.Token);
+
+            _operatorUpdate = new OperatorUpdateInput();
+            await LoadDataAsync();
+            SetSuccess("Operator account updated.");
+        });
+    }
+
+    private async Task HandleResetOperatorPasswordAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.ResetOperatorPasswordAsync(
+                ParseRequiredGuid(_operatorReset.OperatorId, "Operator"),
+                new ResetOperatorPasswordRequest(_operatorReset.NewPassword),
+                _loadCancellation.Token);
+
+            _operatorReset = new OperatorResetInput();
+            await LoadDataAsync();
+            SetSuccess("Operator password reset.");
+        });
+    }
+
+    private async Task HandleDeactivateOperatorAsync(Guid operatorId)
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.DeactivateOperatorAsync(operatorId, _loadCancellation.Token);
+            await LoadDataAsync();
+            SetSuccess("Operator account deactivated.");
+        });
+    }
+
+    private async Task HandleCreateProfileAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.CreateProfileAsync(
+                new CreateMonitoringProfileRequest(
+                    _profileCreate.Name,
+                    _profileCreate.AlertPolicy,
+                    ParseOptionalInt(_profileCreate.DigestIntervalMinutes),
+                    ParseCsv(_profileCreate.KeywordsCsv)),
+                _loadCancellation.Token);
+
+            _profileCreate = new ProfileCreateInput();
+            await LoadDataAsync();
+            SetSuccess("Monitoring profile created.");
+        });
+    }
+
+    private async Task HandleAddProfileRuleAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.AddProfileRuleAsync(
+                ParseRequiredGuid(_profileRule.ProfileId, "Profile"),
+                new AddMonitoringProfileRuleRequest(_profileRule.Keyword),
+                _loadCancellation.Token);
+
+            _profileRule = new ProfileRuleInput();
+            await LoadDataAsync();
+            SetSuccess("Monitoring profile rule added.");
+        });
+    }
+
+    private async Task HandleChangeProfilePolicyAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.ChangeProfileAlertPolicyAsync(
+                ParseRequiredGuid(_profilePolicy.ProfileId, "Profile"),
+                new ChangeMonitoringProfileAlertPolicyRequest(
+                    _profilePolicy.AlertPolicy,
+                    ParseOptionalInt(_profilePolicy.DigestIntervalMinutes)),
+                _loadCancellation.Token);
+
+            _profilePolicy = new ProfilePolicyInput();
+            await LoadDataAsync();
+            SetSuccess("Monitoring profile policy updated.");
+        });
+    }
+
+    private async Task HandleDeactivateProfileAsync(Guid profileId)
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.DeactivateProfileAsync(profileId, _loadCancellation.Token);
+            await LoadDataAsync();
+            SetSuccess("Monitoring profile deactivated.");
+        });
+    }
+
+    private async Task HandleCreateSubscriptionAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.CreateSubscriptionAsync(
+                new CreateProfileSubscriptionRequest(
+                    ParseRequiredGuid(_subscriptionCreate.ProfileId, "Profile"),
+                    _subscriptionCreate.Subscriber,
+                    _subscriptionCreate.Channel,
+                    _subscriptionCreate.AlertPolicy,
+                    ParseOptionalInt(_subscriptionCreate.DigestIntervalMinutes)),
+                _loadCancellation.Token);
+
+            _subscriptionCreate = new SubscriptionCreateInput();
+            await LoadDataAsync();
+            SetSuccess("Profile subscription created.");
+        });
+    }
+
+    private async Task HandleChangeSubscriptionPolicyAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.ChangeSubscriptionAlertPolicyAsync(
+                ParseRequiredGuid(_subscriptionPolicy.SubscriptionId, "Subscription"),
+                new ChangeProfileSubscriptionAlertPolicyRequest(
+                    _subscriptionPolicy.AlertPolicy,
+                    ParseOptionalInt(_subscriptionPolicy.DigestIntervalMinutes)),
+                _loadCancellation.Token);
+
+            _subscriptionPolicy = new SubscriptionPolicyInput();
+            await LoadDataAsync();
+            SetSuccess("Subscription policy updated.");
+        });
+    }
+
+    private async Task HandleDeactivateSubscriptionAsync(Guid subscriptionId)
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.DeactivateSubscriptionAsync(subscriptionId, _loadCancellation.Token);
+            await LoadDataAsync();
+            SetSuccess("Subscription deactivated.");
+        });
+    }
+
+    private async Task HandleCreateWebhookAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.CreateWebhookAsync(
+                new CreateWebhookRegistrationRequest(
+                    _webhookCreate.Name,
+                    _webhookCreate.CallbackUrl,
+                    ParseCsv(_webhookCreate.EventTypesCsv)),
+                _loadCancellation.Token);
+
+            _webhookCreate = new WebhookCreateInput();
+            await LoadDataAsync();
+            SetSuccess("Webhook registered.");
+        });
+    }
+
+    private async Task HandleDeactivateWebhookAsync(Guid webhookId)
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.DeactivateWebhookAsync(webhookId, _loadCancellation.Token);
+            await LoadDataAsync();
+            SetSuccess("Webhook deactivated.");
+        });
+    }
+
+    private async Task HandleUpdateWebhookAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.UpdateWebhookAsync(
+                ParseRequiredGuid(_webhookUpdate.WebhookId, "Webhook"),
+                new UpdateWebhookRegistrationRequest(
+                    _webhookUpdate.Name,
+                    _webhookUpdate.CallbackUrl,
+                    ParseCsv(_webhookUpdate.EventTypesCsv)),
+                _loadCancellation.Token);
+
+            _webhookUpdate = new WebhookUpdateInput();
+            await LoadDataAsync();
+            SetSuccess("Webhook updated.");
+        });
+    }
+
+    private async Task HandleCreateApiClientAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.CreateApiClientAsync(
+                new CreateApiClientRequest(
+                    _apiClientCreate.Name,
+                    _apiClientCreate.ClientIdentifier,
+                    _apiClientCreate.Token,
+                    ParseCsv(_apiClientCreate.ScopesCsv)),
+                _loadCancellation.Token);
+
+            _apiClientCreate = new ApiClientCreateInput();
+            await LoadDataAsync();
+            SetSuccess("API client created.");
+        });
+    }
+
+    private async Task HandleDeactivateApiClientAsync(Guid apiClientId)
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.DeactivateApiClientAsync(apiClientId, _loadCancellation.Token);
+            await LoadDataAsync();
+            SetSuccess("API client deactivated.");
+        });
+    }
+
+    private async Task HandleUpdateApiClientAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            await AdminClient.UpdateApiClientAsync(
+                ParseRequiredGuid(_apiClientUpdate.ApiClientId, "API client"),
+                new UpdateApiClientRequest(
+                    _apiClientUpdate.Name,
+                    string.IsNullOrWhiteSpace(_apiClientUpdate.Token) ? null : _apiClientUpdate.Token,
+                    ParseCsv(_apiClientUpdate.ScopesCsv)),
+                _loadCancellation.Token);
+
+            _apiClientUpdate = new ApiClientUpdateInput();
+            await LoadDataAsync();
+            SetSuccess("API client updated.");
+        });
+    }
+
+    private async Task LoadDataAsync()
+    {
+        var operatorsTask = AdminClient.GetOperatorsAsync(_loadCancellation.Token);
+        var profilesTask = AdminClient.GetProfilesAsync(_loadCancellation.Token);
+        var subscriptionsTask = AdminClient.GetSubscriptionsAsync(_loadCancellation.Token);
+        var webhooksTask = AdminClient.GetWebhooksAsync(_loadCancellation.Token);
+        var apiClientsTask = AdminClient.GetApiClientsAsync(_loadCancellation.Token);
+
+        await Task.WhenAll(operatorsTask, profilesTask, subscriptionsTask, webhooksTask, apiClientsTask);
+
+        _operators = (await operatorsTask).ToList();
+        _profiles = (await profilesTask).ToList();
+        _subscriptions = (await subscriptionsTask).ToList();
+        _webhooks = (await webhooksTask).ToList();
+        _apiClients = (await apiClientsTask).ToList();
+    }
+
+    private async Task ExecuteBusyActionAsync(Func<Task> action, bool clearSuccess = true)
+    {
+        try
+        {
+            _busy = true;
+            _errorMessage = null;
+            if (clearSuccess)
+            {
+                _successMessage = null;
+            }
+
+            await action();
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = exception.Message;
+            if (exception is PortalAdminApiException { StatusCode: 401 or 403 })
+            {
+                _session = await AdminClient.GetSessionAsync(_loadCancellation.Token);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SetSuccess(string message)
+    {
+        _successMessage = message;
+        _errorMessage = null;
+    }
+
+    private static Guid ParseRequiredGuid(string value, string label)
+    {
+        return Guid.TryParse(value, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"{label} must be selected.");
+    }
+
+    private static int? ParseOptionalInt(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        return int.TryParse(trimmed, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException("Digest interval must be a whole number of minutes.");
+    }
+
+    private static string[] ParseCsv(string value)
+    {
+        var parsed = value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(entry => !string.IsNullOrWhiteSpace(entry))
+            .Select(entry => entry.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return parsed.Length == 0
+            ? throw new InvalidOperationException("At least one value is required.")
+            : parsed;
+    }
+
+    private sealed class LoginInput
+    {
+        public string Email { get; set; } = "admin@lawwatcher.local";
+
+        public string Password { get; set; } = "Admin123!";
+    }
+
+    private sealed class OperatorCreateInput
+    {
+        public string Email { get; set; } = string.Empty;
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+
+        public string PermissionsCsv { get; set; } = "operators:write, profiles:write, subscriptions:write, webhooks:write, api-clients:write";
+    }
+
+    private sealed class OperatorUpdateInput
+    {
+        public string OperatorId { get; set; } = string.Empty;
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string PermissionsCsv { get; set; } = "profiles:write, subscriptions:write";
+    }
+
+    private sealed class OperatorResetInput
+    {
+        public string OperatorId { get; set; } = string.Empty;
+
+        public string NewPassword { get; set; } = string.Empty;
+    }
+
+    private sealed class ProfileCreateInput
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string AlertPolicy { get; set; } = "immediate";
+
+        public string DigestIntervalMinutes { get; set; } = string.Empty;
+
+        public string KeywordsCsv { get; set; } = string.Empty;
+    }
+
+    private sealed class ProfileRuleInput
+    {
+        public string ProfileId { get; set; } = string.Empty;
+
+        public string Keyword { get; set; } = string.Empty;
+    }
+
+    private sealed class ProfilePolicyInput
+    {
+        public string ProfileId { get; set; } = string.Empty;
+
+        public string AlertPolicy { get; set; } = "digest";
+
+        public string DigestIntervalMinutes { get; set; } = "180";
+    }
+
+    private sealed class SubscriptionCreateInput
+    {
+        public string ProfileId { get; set; } = string.Empty;
+
+        public string Subscriber { get; set; } = string.Empty;
+
+        public string Channel { get; set; } = "email";
+
+        public string AlertPolicy { get; set; } = "immediate";
+
+        public string DigestIntervalMinutes { get; set; } = string.Empty;
+    }
+
+    private sealed class SubscriptionPolicyInput
+    {
+        public string SubscriptionId { get; set; } = string.Empty;
+
+        public string AlertPolicy { get; set; } = "digest";
+
+        public string DigestIntervalMinutes { get; set; } = "240";
+    }
+
+    private sealed class WebhookCreateInput
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string CallbackUrl { get; set; } = "https://hooks.example.test/lawwatcher";
+
+        public string EventTypesCsv { get; set; } = "alert.created";
+    }
+
+    private sealed class WebhookUpdateInput
+    {
+        public string WebhookId { get; set; } = string.Empty;
+
+        public string Name { get; set; } = string.Empty;
+
+        public string CallbackUrl { get; set; } = "https://hooks.example.test/lawwatcher/updated";
+
+        public string EventTypesCsv { get; set; } = "alert.created, bill.imported";
+    }
+
+    private sealed class ApiClientCreateInput
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string ClientIdentifier { get; set; } = string.Empty;
+
+        public string Token { get; set; } = string.Empty;
+
+        public string ScopesCsv { get; set; } = "profiles:write, subscriptions:write, webhooks:write, api-clients:write";
+    }
+
+    private sealed class ApiClientUpdateInput
+    {
+        public string ApiClientId { get; set; } = string.Empty;
+
+        public string Name { get; set; } = string.Empty;
+
+        public string Token { get; set; } = string.Empty;
+
+        public string ScopesCsv { get; set; } = "profiles:write, webhooks:write";
+    }
+}

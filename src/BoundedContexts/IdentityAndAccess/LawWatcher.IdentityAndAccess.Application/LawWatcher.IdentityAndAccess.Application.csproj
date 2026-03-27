@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LawWatcher.IdentityAndAccess.Domain\LawWatcher.IdentityAndAccess.Domain.csproj" />
+    <ProjectReference Include="..\LawWatcher.IdentityAndAccess.Contracts\LawWatcher.IdentityAndAccess.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\..\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

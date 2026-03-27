@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.7
+
+ARG SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
+ARG RUNTIME_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+
+FROM ${SDK_IMAGE} AS build
+ARG PROJECT_PATH
+ARG LAWWATCHER_ARTIFACTS_ROOT=/tmp/lawwatcher-artifacts
+WORKDIR /src
+ENV LawWatcherArtifactsRoot=${LAWWATCHER_ARTIFACTS_ROOT}
+COPY . .
+RUN dotnet restore "$PROJECT_PATH" -v minimal --disable-build-servers "/p:LawWatcherArtifactsRoot=${LAWWATCHER_ARTIFACTS_ROOT}"
+RUN dotnet publish "$PROJECT_PATH" -c Release --no-restore -m:1 --disable-build-servers "/p:LawWatcherArtifactsRoot=${LAWWATCHER_ARTIFACTS_ROOT}" -o /app/publish
+
+FROM ${RUNTIME_IMAGE} AS runtime
+ARG APP_DLL
+WORKDIR /app
+ENV APP_DLL=${APP_DLL}
+ENV ASPNETCORE_URLS=http://+:8080
+COPY --from=build /app/publish/ .
+ENTRYPOINT ["sh", "-c", "dotnet \"$APP_DLL\""]

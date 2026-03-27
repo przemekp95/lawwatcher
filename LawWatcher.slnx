@@ -1,0 +1,80 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/BoundedContexts/" />
+  <Folder Name="/src/BoundedContexts/AiEnrichment/">
+    <Project Path="src/BoundedContexts/AiEnrichment/LawWatcher.AiEnrichment.Application/LawWatcher.AiEnrichment.Application.csproj" />
+    <Project Path="src/BoundedContexts/AiEnrichment/LawWatcher.AiEnrichment.Contracts/LawWatcher.AiEnrichment.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/AiEnrichment/LawWatcher.AiEnrichment.Domain/LawWatcher.AiEnrichment.Domain.csproj" />
+    <Project Path="src/BoundedContexts/AiEnrichment/LawWatcher.AiEnrichment.Infrastructure/LawWatcher.AiEnrichment.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/IdentityAndAccess/">
+    <Project Path="src/BoundedContexts/IdentityAndAccess/LawWatcher.IdentityAndAccess.Application/LawWatcher.IdentityAndAccess.Application.csproj" />
+    <Project Path="src/BoundedContexts/IdentityAndAccess/LawWatcher.IdentityAndAccess.Contracts/LawWatcher.IdentityAndAccess.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/IdentityAndAccess/LawWatcher.IdentityAndAccess.Domain/LawWatcher.IdentityAndAccess.Domain.csproj" />
+    <Project Path="src/BoundedContexts/IdentityAndAccess/LawWatcher.IdentityAndAccess.Infrastructure/LawWatcher.IdentityAndAccess.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/IntegrationApi/">
+    <Project Path="src/BoundedContexts/IntegrationApi/LawWatcher.IntegrationApi.Application/LawWatcher.IntegrationApi.Application.csproj" />
+    <Project Path="src/BoundedContexts/IntegrationApi/LawWatcher.IntegrationApi.Contracts/LawWatcher.IntegrationApi.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/IntegrationApi/LawWatcher.IntegrationApi.Domain/LawWatcher.IntegrationApi.Domain.csproj" />
+    <Project Path="src/BoundedContexts/IntegrationApi/LawWatcher.IntegrationApi.Infrastructure/LawWatcher.IntegrationApi.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/LegalCorpus/">
+    <Project Path="src/BoundedContexts/LegalCorpus/LawWatcher.LegalCorpus.Application/LawWatcher.LegalCorpus.Application.csproj" />
+    <Project Path="src/BoundedContexts/LegalCorpus/LawWatcher.LegalCorpus.Contracts/LawWatcher.LegalCorpus.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/LegalCorpus/LawWatcher.LegalCorpus.Domain/LawWatcher.LegalCorpus.Domain.csproj" />
+    <Project Path="src/BoundedContexts/LegalCorpus/LawWatcher.LegalCorpus.Infrastructure/LawWatcher.LegalCorpus.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/LegislativeIntake/">
+    <Project Path="src/BoundedContexts/LegislativeIntake/LawWatcher.LegislativeIntake.Application/LawWatcher.LegislativeIntake.Application.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeIntake/LawWatcher.LegislativeIntake.Contracts/LawWatcher.LegislativeIntake.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeIntake/LawWatcher.LegislativeIntake.Domain/LawWatcher.LegislativeIntake.Domain.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeIntake/LawWatcher.LegislativeIntake.Infrastructure/LawWatcher.LegislativeIntake.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/LegislativeProcess/">
+    <Project Path="src/BoundedContexts/LegislativeProcess/LawWatcher.LegislativeProcess.Application/LawWatcher.LegislativeProcess.Application.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeProcess/LawWatcher.LegislativeProcess.Contracts/LawWatcher.LegislativeProcess.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeProcess/LawWatcher.LegislativeProcess.Domain/LawWatcher.LegislativeProcess.Domain.csproj" />
+    <Project Path="src/BoundedContexts/LegislativeProcess/LawWatcher.LegislativeProcess.Infrastructure/LawWatcher.LegislativeProcess.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/Notifications/">
+    <Project Path="src/BoundedContexts/Notifications/LawWatcher.Notifications.Application/LawWatcher.Notifications.Application.csproj" />
+    <Project Path="src/BoundedContexts/Notifications/LawWatcher.Notifications.Contracts/LawWatcher.Notifications.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/Notifications/LawWatcher.Notifications.Domain/LawWatcher.Notifications.Domain.csproj" />
+    <Project Path="src/BoundedContexts/Notifications/LawWatcher.Notifications.Infrastructure/LawWatcher.Notifications.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/SearchAndDiscovery/">
+    <Project Path="src/BoundedContexts/SearchAndDiscovery/LawWatcher.SearchAndDiscovery.Application/LawWatcher.SearchAndDiscovery.Application.csproj" />
+    <Project Path="src/BoundedContexts/SearchAndDiscovery/LawWatcher.SearchAndDiscovery.Contracts/LawWatcher.SearchAndDiscovery.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/SearchAndDiscovery/LawWatcher.SearchAndDiscovery.Domain/LawWatcher.SearchAndDiscovery.Domain.csproj" />
+    <Project Path="src/BoundedContexts/SearchAndDiscovery/LawWatcher.SearchAndDiscovery.Infrastructure/LawWatcher.SearchAndDiscovery.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BoundedContexts/TaxonomyAndProfiles/">
+    <Project Path="src/BoundedContexts/TaxonomyAndProfiles/LawWatcher.TaxonomyAndProfiles.Application/LawWatcher.TaxonomyAndProfiles.Application.csproj" />
+    <Project Path="src/BoundedContexts/TaxonomyAndProfiles/LawWatcher.TaxonomyAndProfiles.Contracts/LawWatcher.TaxonomyAndProfiles.Contracts.csproj" />
+    <Project Path="src/BoundedContexts/TaxonomyAndProfiles/LawWatcher.TaxonomyAndProfiles.Domain/LawWatcher.TaxonomyAndProfiles.Domain.csproj" />
+    <Project Path="src/BoundedContexts/TaxonomyAndProfiles/LawWatcher.TaxonomyAndProfiles.Infrastructure/LawWatcher.TaxonomyAndProfiles.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="src/BuildingBlocks/LawWatcher.BuildingBlocks/LawWatcher.BuildingBlocks.csproj" />
+  </Folder>
+  <Folder Name="/src/Server/">
+    <Project Path="src/Server/LawWatcher.Api/LawWatcher.Api.csproj" />
+    <Project Path="src/Server/LawWatcher.Portal/LawWatcher.Portal.csproj" />
+  </Folder>
+  <Folder Name="/src/SharedKernel/">
+    <Project Path="src/SharedKernel/LawWatcher.SharedKernel/LawWatcher.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Workers/">
+    <Project Path="src/Workers/LawWatcher.Worker.Ai/LawWatcher.Worker.Ai.csproj" />
+    <Project Path="src/Workers/LawWatcher.Worker.Documents/LawWatcher.Worker.Documents.csproj" />
+    <Project Path="src/Workers/LawWatcher.Worker.Lite/LawWatcher.Worker.Lite.csproj" />
+    <Project Path="src/Workers/LawWatcher.Worker.Notifications/LawWatcher.Worker.Notifications.csproj" />
+    <Project Path="src/Workers/LawWatcher.Worker.Projection/LawWatcher.Worker.Projection.csproj" />
+    <Project Path="src/Workers/LawWatcher.Worker.Replay/LawWatcher.Worker.Replay.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LawWatcher.ApplicationSpecs/LawWatcher.ApplicationSpecs.csproj" />
+    <Project Path="tests/LawWatcher.ArchitectureSpecs/LawWatcher.ArchitectureSpecs.csproj" />
+  </Folder>
+</Solution>

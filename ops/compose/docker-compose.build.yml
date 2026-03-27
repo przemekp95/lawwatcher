@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Server/LawWatcher.Api/LawWatcher.Api.csproj
+        APP_DLL: LawWatcher.Api.dll
+
+  portal:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Server/LawWatcher.Portal/LawWatcher.Portal.csproj
+        APP_DLL: LawWatcher.Portal.dll
+
+  worker-lite:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Lite/LawWatcher.Worker.Lite.csproj
+        APP_DLL: LawWatcher.Worker.Lite.dll
+
+  worker-ai:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Ai/LawWatcher.Worker.Ai.csproj
+        APP_DLL: LawWatcher.Worker.Ai.dll

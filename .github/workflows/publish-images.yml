@@ -1,0 +1,91 @@
+name: publish-images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  host-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: lawwatcher-api
+            project_path: src/Server/LawWatcher.Api/LawWatcher.Api.csproj
+            app_dll: LawWatcher.Api.dll
+          - image_name: lawwatcher-portal
+            project_path: src/Server/LawWatcher.Portal/LawWatcher.Portal.csproj
+            app_dll: LawWatcher.Portal.dll
+          - image_name: lawwatcher-worker-lite
+            project_path: src/Workers/LawWatcher.Worker.Lite/LawWatcher.Worker.Lite.csproj
+            app_dll: LawWatcher.Worker.Lite.dll
+          - image_name: lawwatcher-worker-ai
+            project_path: src/Workers/LawWatcher.Worker.Ai/LawWatcher.Worker.Ai.csproj
+            app_dll: LawWatcher.Worker.Ai.dll
+          - image_name: lawwatcher-worker-documents
+            project_path: src/Workers/LawWatcher.Worker.Documents/LawWatcher.Worker.Documents.csproj
+            app_dll: LawWatcher.Worker.Documents.dll
+          - image_name: lawwatcher-worker-projection
+            project_path: src/Workers/LawWatcher.Worker.Projection/LawWatcher.Worker.Projection.csproj
+            app_dll: LawWatcher.Worker.Projection.dll
+          - image_name: lawwatcher-worker-notifications
+            project_path: src/Workers/LawWatcher.Worker.Notifications/LawWatcher.Worker.Notifications.csproj
+            app_dll: LawWatcher.Worker.Notifications.dll
+          - image_name: lawwatcher-worker-replay
+            project_path: src/Workers/LawWatcher.Worker.Replay/LawWatcher.Worker.Replay.csproj
+            app_dll: LawWatcher.Worker.Replay.dll
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/compose/Dockerfile.host
+          build-args: |
+            PROJECT_PATH=${{ matrix.project_path }}
+            APP_DLL=${{ matrix.app_dll }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

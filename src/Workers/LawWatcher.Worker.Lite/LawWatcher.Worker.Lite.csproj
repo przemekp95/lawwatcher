@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-LawWatcher.Worker.Lite-a679642b-b56d-4dc4-8d7d-f5a3309aed54</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Infrastructure\LawWatcher.AiEnrichment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Application\LawWatcher.IntegrationApi.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Infrastructure\LawWatcher.IntegrationApi.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Application\LawWatcher.LegislativeIntake.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Contracts\LawWatcher.LegislativeIntake.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Infrastructure\LawWatcher.LegislativeIntake.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Application\LawWatcher.LegislativeProcess.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Contracts\LawWatcher.LegislativeProcess.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Infrastructure\LawWatcher.LegislativeProcess.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Application\LawWatcher.LegalCorpus.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Contracts\LawWatcher.LegalCorpus.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Infrastructure\LawWatcher.LegalCorpus.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\Notifications\LawWatcher.Notifications.Application\LawWatcher.Notifications.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\Notifications\LawWatcher.Notifications.Contracts\LawWatcher.Notifications.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\Notifications\LawWatcher.Notifications.Infrastructure\LawWatcher.Notifications.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Application\LawWatcher.SearchAndDiscovery.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Infrastructure\LawWatcher.SearchAndDiscovery.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Application\LawWatcher.TaxonomyAndProfiles.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Contracts\LawWatcher.TaxonomyAndProfiles.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Infrastructure\LawWatcher.TaxonomyAndProfiles.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(LawWatcherSuppressHostSettings)' == 'true'">
+    <Content Update="appsettings.json;appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+    <None Update="appsettings.json;appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+</Project>

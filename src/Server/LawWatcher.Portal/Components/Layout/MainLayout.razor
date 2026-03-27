@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+        <div class="top-row-heading">
+            <p class="eyebrow">LawWatcher</p>
+            <strong>Legislative operations portal</strong>
+        </div>
+        <div class="top-row-status">
+            <span>Read views plus operator admin console on top of internal v1 endpoints</span>
+        </div>
+    </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">x</span>
+</div>

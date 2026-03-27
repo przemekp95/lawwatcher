@@ -1,0 +1,133 @@
+@page "/activity"
+@attribute [StreamRendering]
+@implements IDisposable
+@inject LawWatcherPortalApiClient PortalApiClient
+
+<PageTitle>Activity</PageTitle>
+
+<section class="portal-shell">
+    <div class="hero-panel">
+        <p class="eyebrow">Operational activity</p>
+        <h1>Alerts and event feed</h1>
+        <p class="lede">
+            This view surfaces recent alert generation and event flow from the internal read models without touching the write side.
+        </p>
+    </div>
+
+    @if (_state is null)
+    {
+        <section class="section-card">
+            <h2>Loading</h2>
+            <p>Collecting alerts and feed items...</p>
+        </section>
+    }
+    else
+    {
+        @if (_state.Warnings.Count > 0)
+        {
+            <section class="warnings-panel">
+                <h2>Portal warnings</h2>
+                <ul class="warning-list">
+                    @foreach (var warning in _state.Warnings)
+                    {
+                        <li>
+                            <strong>@warning.Source:</strong> @warning.Message
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <section class="metrics-grid metrics-grid-compact">
+            <article class="metric-card">
+                <p class="metric-label">Alerts</p>
+                <p class="metric-value">@_state.Alerts.Count</p>
+                <p class="metric-note">available notification items</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Events</p>
+                <p class="metric-value">@_state.Events.Count</p>
+                <p class="metric-note">recent operational feed entries</p>
+            </article>
+        </section>
+
+        <section class="section-grid two-up">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Notifications</p>
+                        <h2>Latest alerts</h2>
+                    </div>
+                </div>
+
+                @if (_state.Alerts.Count == 0)
+                {
+                    <p class="empty-state">No alerts are available yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var alert in _state.Alerts.Take(8))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@alert.ProfileName</strong>
+                                    <p>@alert.BillTitle</p>
+                                </div>
+                                <span>@FormatTimestamp(alert.CreatedAtUtc)</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Event stream</p>
+                        <h2>Recent feed items</h2>
+                    </div>
+                </div>
+
+                @if (_state.Events.Count == 0)
+                {
+                    <p class="empty-state">No events are available yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var item in _state.Events.Take(10))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@item.Type</strong>
+                                    <p>@item.Title</p>
+                                </div>
+                                <span>@FormatTimestamp(item.OccurredAtUtc)</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+        </section>
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource _loadCancellation = new();
+    private PortalActivityData? _state;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _state = await PortalApiClient.GetActivityAsync(_loadCancellation.Token);
+    }
+
+    public void Dispose()
+    {
+        _loadCancellation.Cancel();
+        _loadCancellation.Dispose();
+    }
+
+    private static string FormatTimestamp(DateTimeOffset timestamp) =>
+        timestamp.ToLocalTime().ToString("dd MMM yyyy HH:mm");
+}

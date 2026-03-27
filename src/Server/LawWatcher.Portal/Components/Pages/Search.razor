@@ -1,0 +1,134 @@
+@page "/search"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject LawWatcherPortalApiClient PortalApiClient
+
+<PageTitle>Search</PageTitle>
+
+<section class="portal-shell">
+    <div class="hero-panel">
+        <p class="eyebrow">Search and discovery</p>
+        <h1>Search the legislative corpus</h1>
+        <p class="lede">
+            The laptop-first profile uses the same API contract for search while keeping SQL full-text as the baseline backend.
+        </p>
+    </div>
+
+    <section class="section-card">
+        <form class="search-form" @onsubmit="HandleSearchAsync" @onsubmit:preventDefault>
+            <label class="search-label" for="search-query">Query</label>
+            <div class="search-controls">
+                <input id="search-query" class="search-input" @bind="_input" @bind:event="oninput" placeholder="Try VAT, CIT or a bill title" />
+                <button type="submit" class="search-button">Run search</button>
+            </div>
+        </form>
+    </section>
+
+    @if (_loading)
+    {
+        <section class="section-card">
+            <h2>Loading</h2>
+            <p>Querying the read API...</p>
+        </section>
+    }
+    else if (string.IsNullOrWhiteSpace(Query))
+    {
+        <section class="section-card">
+            <h2>Ready</h2>
+            <p>Enter a query to inspect bills, acts, processes, profiles and alerts indexed by the portal.</p>
+        </section>
+    }
+    else if (_state is not null)
+    {
+        @if (_state.Warnings.Count > 0)
+        {
+            <section class="warnings-panel">
+                <h2>Portal warnings</h2>
+                <ul class="warning-list">
+                    @foreach (var warning in _state.Warnings)
+                    {
+                        <li>
+                            <strong>@warning.Source:</strong> @warning.Message
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <section class="section-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Results</p>
+                    <h2>@_state.Hits.Count hit(s) for "@_state.Query"</h2>
+                </div>
+                <span class="status-pill">backend: @GetBackendLabel(_state)</span>
+            </div>
+
+            @if (_state.Hits.Count == 0)
+            {
+                <p class="empty-state">No search results matched the current query.</p>
+            }
+            else
+            {
+                <ul class="search-results">
+                    @foreach (var hit in _state.Hits)
+                    {
+                        <li class="search-result-card">
+                            <div class="search-result-header">
+                                <strong>@hit.Title</strong>
+                                <span class="result-type">@hit.Type</span>
+                            </div>
+                            <p>@hit.Snippet</p>
+                            <code>@hit.Id</code>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Query { get; set; }
+
+    private readonly CancellationTokenSource _loadCancellation = new();
+    private PortalSearchData? _state;
+    private string _input = string.Empty;
+    private bool _loading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _input = Query ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            _state = PortalSearchData.Empty;
+            _loading = false;
+            return;
+        }
+
+        _loading = true;
+        _state = await PortalApiClient.SearchAsync(Query, _loadCancellation.Token);
+        _loading = false;
+    }
+
+    public void Dispose()
+    {
+        _loadCancellation.Cancel();
+        _loadCancellation.Dispose();
+    }
+
+    private Task HandleSearchAsync()
+    {
+        var trimmedQuery = _input.Trim();
+        NavigationManager.NavigateTo(
+            string.IsNullOrWhiteSpace(trimmedQuery)
+                ? "/search"
+                : $"/search?q={Uri.EscapeDataString(trimmedQuery)}");
+        return Task.CompletedTask;
+    }
+
+    private static string GetBackendLabel(PortalSearchData state) =>
+        state.Backend == SearchBackend.HybridVector ? "hybrid/vector" : "sql-fts";
+}

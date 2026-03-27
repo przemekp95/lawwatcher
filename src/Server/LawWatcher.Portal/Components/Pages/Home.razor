@@ -1,0 +1,278 @@
+@page "/"
+@attribute [StreamRendering]
+@implements IDisposable
+@inject LawWatcherPortalApiClient PortalApiClient
+
+<PageTitle>Dashboard</PageTitle>
+
+<section class="portal-shell">
+    <div class="hero-panel">
+        <p class="eyebrow">LawWatcher portal</p>
+        <h1>Legislative monitoring dashboard</h1>
+        <p class="lede">
+            This dashboard reads runtime capabilities, monitoring profiles, bills, alerts, acts and AI task status from the internal v1 API.
+        </p>
+    </div>
+
+    @if (_state is null)
+    {
+        <section class="section-card">
+            <h2>Loading</h2>
+            <p>Connecting to the read API...</p>
+        </section>
+    }
+    else
+    {
+        @if (_state.Warnings.Count > 0)
+        {
+            <section class="warnings-panel">
+                <h2>Portal warnings</h2>
+                <ul class="warning-list">
+                    @foreach (var warning in _state.Warnings)
+                    {
+                        <li>
+                            <strong>@warning.Source:</strong> @warning.Message
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <section class="capability-strip">
+            <span class="status-pill">@_state.RuntimeProfile</span>
+            <span class="status-pill">AI @_state.Capabilities.Ai.ActivationMode</span>
+            <span class="status-pill">Search @GetSearchBackendLabel(_state)</span>
+            <span class="status-pill">@(_state.Capabilities.OcrEnabled ? "OCR enabled" : "OCR on demand")</span>
+            <span class="status-pill">@(_state.Capabilities.ReplayEnabled ? "Replay enabled" : "Replay disabled")</span>
+        </section>
+
+        <section class="metrics-grid">
+            <article class="metric-card">
+                <p class="metric-label">Profiles</p>
+                <p class="metric-value">@_state.ProfileCount</p>
+                <p class="metric-note">central monitoring rules</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Bills</p>
+                <p class="metric-value">@_state.BillCount</p>
+                <p class="metric-note">tracked intake records</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Processes</p>
+                <p class="metric-value">@_state.ProcessCount</p>
+                <p class="metric-note">current legislative flow</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Acts</p>
+                <p class="metric-value">@_state.ActCount</p>
+                <p class="metric-note">published corpus items</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">Alerts</p>
+                <p class="metric-value">@_state.AlertCount</p>
+                <p class="metric-note">profile matches available</p>
+            </article>
+            <article class="metric-card">
+                <p class="metric-label">AI queue</p>
+                <p class="metric-value">@_state.ActiveAiTaskCount</p>
+                <p class="metric-note">local LLM on demand</p>
+            </article>
+        </section>
+
+        <section class="section-grid">
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Legislative intake</p>
+                        <h2>Recent bills</h2>
+                    </div>
+                </div>
+
+                @if (_state.Bills.Count == 0)
+                {
+                    <p class="empty-state">No bills are available yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var bill in _state.Bills.Take(4))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@bill.Title</strong>
+                                    <p>@bill.ExternalId · @bill.SourceSystem</p>
+                                </div>
+                                <span>@bill.SubmittedOn.ToString("dd MMM yyyy")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Legislative process</p>
+                        <h2>Current stages</h2>
+                    </div>
+                </div>
+
+                @if (_state.Processes.Count == 0)
+                {
+                    <p class="empty-state">No process summaries are available yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var process in _state.Processes.Take(4))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@process.BillTitle</strong>
+                                    <p>@process.CurrentStageLabel · @process.StageCount stages</p>
+                                </div>
+                                <span>@process.LastUpdatedOn.ToString("dd MMM yyyy")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Legal corpus</p>
+                        <h2>Published acts</h2>
+                    </div>
+                </div>
+
+                @if (_state.Acts.Count == 0)
+                {
+                    <p class="empty-state">No acts are available yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var act in _state.Acts.Take(4))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@act.Title</strong>
+                                    <p>@act.Eli</p>
+                                </div>
+                                <span>@act.PublishedOn.ToString("dd MMM yyyy")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="section-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Notifications</p>
+                        <h2>Latest alerts</h2>
+                    </div>
+                </div>
+
+                @if (_state.Alerts.Count == 0)
+                {
+                    <p class="empty-state">No alerts have been generated yet.</p>
+                }
+                else
+                {
+                    <ul class="list-feed">
+                        @foreach (var alert in _state.Alerts.Take(4))
+                        {
+                            <li class="list-item">
+                                <div>
+                                    <strong>@alert.ProfileName</strong>
+                                    <p>@alert.BillTitle</p>
+                                </div>
+                                <span>@FormatTimestamp(alert.CreatedAtUtc)</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </article>
+
+            <article class="section-card section-card-wide">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Operations</p>
+                        <h2>Event feed and AI tasks</h2>
+                    </div>
+                </div>
+
+                <div class="two-column-stack">
+                    <div>
+                        <h3>Event feed</h3>
+                        @if (_state.Events.Count == 0)
+                        {
+                            <p class="empty-state">No event feed items are available yet.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-feed compact-feed">
+                                @foreach (var item in _state.Events.Take(5))
+                                {
+                                    <li class="list-item">
+                                        <div>
+                                            <strong>@item.Type</strong>
+                                            <p>@item.Title</p>
+                                        </div>
+                                        <span>@FormatTimestamp(item.OccurredAtUtc)</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                    <div>
+                        <h3>AI task status</h3>
+                        @if (_state.AiTasks.Count == 0)
+                        {
+                            <p class="empty-state">No AI tasks were requested yet.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-feed compact-feed">
+                                @foreach (var task in _state.AiTasks.Take(4))
+                                {
+                                    <li class="list-item">
+                                        <div>
+                                            <strong>@task.SubjectTitle</strong>
+                                            <p>@task.Kind · @task.Status</p>
+                                        </div>
+                                        <span>@FormatTimestamp(task.RequestedAtUtc)</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            </article>
+        </section>
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource _loadCancellation = new();
+    private PortalDashboardData? _state;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _state = await PortalApiClient.GetDashboardAsync(_loadCancellation.Token);
+    }
+
+    public void Dispose()
+    {
+        _loadCancellation.Cancel();
+        _loadCancellation.Dispose();
+    }
+
+    private static string FormatTimestamp(DateTimeOffset timestamp) =>
+        timestamp.ToLocalTime().ToString("dd MMM yyyy HH:mm");
+
+    private static string GetSearchBackendLabel(PortalDashboardData state) =>
+        state.Capabilities.Search.Backend == SearchBackend.HybridVector ? "hybrid" : "sql-fts";
+}

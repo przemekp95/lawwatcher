@@ -1,0 +1,22 @@
+.dotnet/
+.nuget/
+.appdata/
+.localappdata/
+.artifacts/
+.artifactsbin/
+.artifactsobj/
+.playwright-cli/
+.tmp-state/
+.tools/
+.publish-cache/
+output/
+test-results/
+*.log
+artifacts/
+artifacts -v minimalbin/
+artifacts -v minimalobj/
+artifactsbin/
+artifactsobj/
+bin/
+obj/
+.vs/

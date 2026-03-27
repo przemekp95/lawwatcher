@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\src\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Application\LawWatcher.SearchAndDiscovery.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Contracts\LawWatcher.SearchAndDiscovery.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Infrastructure\LawWatcher.SearchAndDiscovery.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Application\LawWatcher.AiEnrichment.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Contracts\LawWatcher.AiEnrichment.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Infrastructure\LawWatcher.AiEnrichment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IdentityAndAccess\LawWatcher.IdentityAndAccess.Application\LawWatcher.IdentityAndAccess.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IdentityAndAccess\LawWatcher.IdentityAndAccess.Contracts\LawWatcher.IdentityAndAccess.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IdentityAndAccess\LawWatcher.IdentityAndAccess.Infrastructure\LawWatcher.IdentityAndAccess.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Domain\LawWatcher.IntegrationApi.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Application\LawWatcher.IntegrationApi.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Contracts\LawWatcher.IntegrationApi.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\IntegrationApi\LawWatcher.IntegrationApi.Infrastructure\LawWatcher.IntegrationApi.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Domain\LawWatcher.LegislativeIntake.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Application\LawWatcher.LegislativeIntake.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Contracts\LawWatcher.LegislativeIntake.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Infrastructure\LawWatcher.LegislativeIntake.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Domain\LawWatcher.LegalCorpus.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Application\LawWatcher.LegalCorpus.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Contracts\LawWatcher.LegalCorpus.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Infrastructure\LawWatcher.LegalCorpus.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Domain\LawWatcher.LegislativeProcess.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Application\LawWatcher.LegislativeProcess.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Contracts\LawWatcher.LegislativeProcess.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\LegislativeProcess\LawWatcher.LegislativeProcess.Infrastructure\LawWatcher.LegislativeProcess.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\Notifications\LawWatcher.Notifications.Application\LawWatcher.Notifications.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\Notifications\LawWatcher.Notifications.Contracts\LawWatcher.Notifications.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\Notifications\LawWatcher.Notifications.Infrastructure\LawWatcher.Notifications.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Domain\LawWatcher.TaxonomyAndProfiles.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Application\LawWatcher.TaxonomyAndProfiles.Application.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Contracts\LawWatcher.TaxonomyAndProfiles.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Infrastructure\LawWatcher.TaxonomyAndProfiles.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <!-- Serial project-reference evaluation avoids intermittent unresolved-reference failures in this spec host. -->
+    <BuildInParallel>false</BuildInParallel>
+  </PropertyGroup>
+
+</Project>

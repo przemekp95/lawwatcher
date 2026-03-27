@@ -1,0 +1,148 @@
+services:
+  api:
+    environment:
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}
+      LawWatcher__Runtime__Capabilities__HybridSearch: ${ENABLE_OPENSEARCH}
+      Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
+      Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
+      LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
+
+  worker-lite:
+    profiles:
+      - dev-laptop
+
+  worker-documents:
+    image: ${LAWWATCHER_WORKER_DOCUMENTS_IMAGE}
+    profiles:
+      - full-host
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Storage__Provider: sqlserver
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      AI__MODE: ${AI__MODE}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
+      LawWatcher__Health__Urls: http://+:8080
+      LawWatcher__LocalLlmWorker__MaxConcurrency: ${WORKERS__DOCUMENTS__MAXCONCURRENCY}
+    ports:
+      - "${WORKER_DOCUMENTS_HEALTH_PORT:-5396}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      ollama:
+        condition: service_started
+
+  worker-projection:
+    image: ${LAWWATCHER_WORKER_PROJECTION_IMAGE}
+    profiles:
+      - full-host
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Storage__Provider: sqlserver
+      LawWatcher__Health__Urls: http://+:8080
+      LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}
+      LawWatcher__Runtime__Capabilities__HybridSearch: ${ENABLE_OPENSEARCH}
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
+      Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
+      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
+      LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
+      LawWatcher__WorkerLite__MaxConcurrency: ${WORKERS__PROJECTION__MAXCONCURRENCY}
+      LawWatcher__WorkerLite__EnabledPipelines__0: projection
+    ports:
+      - "${WORKER_PROJECTION_HEALTH_PORT:-5393}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+      ollama:
+        condition: service_started
+
+  worker-notifications:
+    image: ${LAWWATCHER_WORKER_NOTIFICATIONS_IMAGE}
+    profiles:
+      - full-host
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Storage__Provider: sqlserver
+      LawWatcher__Health__Urls: http://+:8080
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      LawWatcher__WorkerLite__MaxConcurrency: ${WORKERS__NOTIFICATIONS__MAXCONCURRENCY}
+      LawWatcher__WorkerLite__EnabledPipelines__0: notifications
+    ports:
+      - "${WORKER_NOTIFICATIONS_HEALTH_PORT:-5394}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  worker-replay:
+    image: ${LAWWATCHER_WORKER_REPLAY_IMAGE}
+    profiles:
+      - full-host
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Storage__Provider: sqlserver
+      LawWatcher__Health__Urls: http://+:8080
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      LawWatcher__WorkerLite__MaxConcurrency: ${WORKERS__REPLAY__MAXCONCURRENCY}
+      LawWatcher__WorkerLite__EnabledPipelines__0: replay
+      LawWatcher__WorkerLite__EnabledPipelines__1: backfill
+    ports:
+      - "${WORKER_REPLAY_HEALTH_PORT:-5395}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    profiles:
+      - opensearch
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:-"-Xms1g -Xmx1g"}
+      DISABLE_SECURITY_PLUGIN: "true"
+    ports:
+      - "${OPENSEARCH_HTTP_PORT:-9200}:9200"
+      - "${OPENSEARCH_TRANSPORT_PORT:-9300}:9300"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+
+volumes:
+  opensearch-data:

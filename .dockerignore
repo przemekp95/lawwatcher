@@ -1,0 +1,17 @@
+.git
+.github
+.artifacts
+.dotnet
+.nuget
+output
+**/bin
+**/obj
+*.log
+api-*-out.log
+api-*-err.log
+worker-*-out.log
+worker-*-err.log
+portal-*-out.log
+portal-*-err.log
+sqlserver-specs-*.log
+docker-*-summary.json

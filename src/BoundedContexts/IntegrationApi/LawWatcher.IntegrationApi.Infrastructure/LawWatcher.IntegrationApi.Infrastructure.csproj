@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\LawWatcher.IntegrationApi.Application\LawWatcher.IntegrationApi.Application.csproj" />
+    <ProjectReference Include="..\LawWatcher.IntegrationApi.Domain\LawWatcher.IntegrationApi.Domain.csproj" />
+    <ProjectReference Include="..\LawWatcher.IntegrationApi.Contracts\LawWatcher.IntegrationApi.Contracts.csproj" />
+    <ProjectReference Include="..\..\Notifications\LawWatcher.Notifications.Application\LawWatcher.Notifications.Application.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\..\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
