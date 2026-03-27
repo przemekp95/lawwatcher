@@ -44,11 +44,16 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 env_file="${tmp_dir}/full-host.env"
+worker_ai_health_port="$(get_free_port)"
+worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
   "ops/env/full-host.env.example" \
   "${env_file}" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
+  "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
+  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
 
 compose_args=(
   compose
@@ -91,10 +96,14 @@ fi
 wait_http_ok "http://127.0.0.1:8080/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:8081/" >/dev/null
 wait_http_ok "http://127.0.0.1:8081/admin" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:5393/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:5394/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:5395/health/ready" >/dev/null
-wait_http_ok "http://127.0.0.1:5396/health/ready" >/dev/null
+wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
+echo "Waiting for seeded act OCR artifacts..." >&2
+wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
 acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/acts")"
 profiles_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/profiles")"
@@ -117,6 +126,12 @@ completed_backfill_json="$(wait_entity_completed "http://127.0.0.1:8080/v1/backf
 
 search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=VAT")"
 capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
+
+ocr_enabled="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(Boolean(data.ocrEnabled)));")"
+if [[ "$ocr_enabled" != "true" ]]; then
+  echo "Expected OCR capability to be enabled in full-host smoke." >&2
+  exit 1
+fi
 
 if [[ "$include_opensearch" == "true" ]]; then
   backend="$(printf '%s' "$search_json" | json_eval "process.stdout.write(String(data.backend));")"
@@ -154,6 +169,13 @@ if [[ "$citations_ok" != "1" ]]; then
   exit 1
 fi
 
+ocr_search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=1%20kwietnia%202026")"
+ocr_search_has_act_hit="$(printf '%s' "$ocr_search_json" | json_eval "process.stdout.write(String((data.hits || []).some(hit => String(hit.type || '') === 'act')));")"
+if [[ "$ocr_search_has_act_hit" != "true" ]]; then
+  echo "Expected full-host search projection to return an act hit for the grounded act source text." >&2
+  exit 1
+fi
+
 services_json="$(docker_compose_json_array "${compose_args[@]}")"
 summary_path="$repo_root/output/smoke/docker-full-host-linux-summary.json"
 mkdir -p "$(dirname "$summary_path")"
@@ -166,7 +188,8 @@ COMPLETED_REPLAY_JSON="$completed_replay_json" \
 COMPLETED_BACKFILL_JSON="$completed_backfill_json" \
 COMPLETED_AI_TASK_JSON="$completed_ai_task_json" \
 NOTIFICATION_DISPATCHES_JSON="$notification_dispatches_json" \
+OCR_SEARCH_JSON="$ocr_search_json" \
 SERVICES_JSON="$services_json" \
 AI_MODEL="$ai_model" \
 EMBEDDING_MODEL="$embedding_model" \
-node -e "const acts=JSON.parse(process.env.ACTS_JSON); const search=JSON.parse(process.env.SEARCH_JSON); const capabilities=JSON.parse(process.env.CAPABILITIES_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const dispatch=JSON.parse(process.env.NOTIFICATION_DISPATCHES_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), includeOpenSearch:process.env.INCLUDE_OPENSEARCH.toLowerCase()==='true', actsCount:acts.length, searchHitCount:(search.hits||[]).length, searchBackend:search.backend, capabilitiesBackend:(capabilities.search||{}).backend, replayStatus:replay.status, backfillStatus:backfill.status, aiTaskStatus:aiTask.status, model:aiTask.model||process.env.AI_MODEL, embeddingModel:process.env.EMBEDDING_MODEL, notificationDispatchCount:dispatch ? 1 : 0, services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "$summary_path"
+node -e "const acts=JSON.parse(process.env.ACTS_JSON); const search=JSON.parse(process.env.SEARCH_JSON); const capabilities=JSON.parse(process.env.CAPABILITIES_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const dispatch=JSON.parse(process.env.NOTIFICATION_DISPATCHES_JSON); const ocrSearch=JSON.parse(process.env.OCR_SEARCH_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), includeOpenSearch:process.env.INCLUDE_OPENSEARCH.toLowerCase()==='true', ocrEnabled:Boolean(capabilities.ocrEnabled), actsCount:acts.length, searchHitCount:(search.hits||[]).length, ocrSearchHitCount:(ocrSearch.hits||[]).length, searchBackend:search.backend, capabilitiesBackend:(capabilities.search||{}).backend, replayStatus:replay.status, backfillStatus:backfill.status, aiTaskStatus:aiTask.status, model:aiTask.model||process.env.AI_MODEL, embeddingModel:process.env.EMBEDDING_MODEL, notificationDispatchCount:dispatch ? 1 : 0, services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "$summary_path"

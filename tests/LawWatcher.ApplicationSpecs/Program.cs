@@ -40,6 +40,8 @@ using LawWatcher.TaxonomyAndProfiles.Contracts;
 using LawWatcher.TaxonomyAndProfiles.Domain.MonitoringProfiles;
 using LawWatcher.TaxonomyAndProfiles.Domain.Subscriptions;
 using LawWatcher.TaxonomyAndProfiles.Infrastructure;
+using LawWatcher.Worker.Documents;
+using LawWatcher.Worker.Lite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -49,430 +51,7 @@ using System.Text;
 
 var failures = new List<string>();
 
-var devLaptop = RuntimeProfile.Parse("dev-laptop");
-Expect.Equal(RuntimeProfile.DevLaptop, devLaptop, "Runtime profile parser should recognize dev-laptop.", failures);
-
-var capabilities = SystemCapabilities.FromOptions(
-    devLaptop,
-    new CapabilityOptions
-    {
-        Ai = true,
-        Ocr = true,
-        Replay = true,
-        SemanticSearch = false,
-        HybridSearch = false
-    });
-
-Expect.True(capabilities.Ai.Enabled, "AI should remain enabled on laptop-first profile.", failures);
-Expect.Equal(AiActivationMode.OnDemand, capabilities.Ai.ActivationMode, "Laptop-first profile should use on-demand local LLM activation.", failures);
-Expect.Equal(TimeSpan.FromMinutes(2), capabilities.Ai.UnloadAfterIdle, "Laptop-first profile should unload the local model after a short idle period.", failures);
-Expect.False(capabilities.Search.UseSqlFullText, "Projection index should be the supported baseline search backend on laptop-first profile.", failures);
-Expect.False(capabilities.Search.UseHybridSearch, "Hybrid search should stay disabled on laptop-first profile by default.", failures);
-
-var selector = new SearchBackendSelector();
-Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(capabilities.Search), "Search backend selector should use the projection index when laptop-first SQL Full-Text is not explicitly enabled.", failures);
-
-var sqlFullTextCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
-    capabilities.Search with
-    {
-        UseSqlFullText = true
-    },
-    new SearchInfrastructureCapabilities(
-        SupportsSqlFullText: true,
-        SupportsHybridSearch: false));
-Expect.True(sqlFullTextCapabilities.UseSqlFullText, "Effective search capabilities should allow SQL Full-Text when it is explicitly enabled and the runtime can provide it.", failures);
-Expect.Equal(SearchBackend.SqlFullText, selector.Select(sqlFullTextCapabilities), "Search backend selector should still prefer SQL Full-Text when it is explicitly enabled and available.", failures);
-
-var degradedSearchCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
-    capabilities.Search,
-    new SearchInfrastructureCapabilities(
-        SupportsSqlFullText: false,
-        SupportsHybridSearch: false));
-Expect.False(degradedSearchCapabilities.UseSqlFullText, "Effective search capabilities should disable SQL Full-Text when the runtime cannot provide it.", failures);
-Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(degradedSearchCapabilities), "Search backend selector should fall back to the projection index when hybrid search is disabled and SQL Full-Text is unavailable.", failures);
-Expect.Equal(
-    "\"VAT*\" OR \"JPK_V7*\"",
-    SqlServerFullTextSearchConditionBuilder.Build(" VAT  JPK_V7 ") ?? string.Empty,
-    "SQL full-text search condition builder should normalize and OR distinct search terms.",
-    failures);
-Expect.Equal(
-    "\"2026*\" OR \"502*\"",
-    SqlServerFullTextSearchConditionBuilder.Build("2026/502") ?? string.Empty,
-    "SQL full-text search condition builder should split punctuation-delimited terms for native SQL Full-Text queries.",
-    failures);
-
-var fullHostCapabilities = SystemCapabilities.FromOptions(
-    RuntimeProfile.FullHost,
-    new CapabilityOptions
-    {
-        Ai = true,
-        Ocr = true,
-        Replay = true,
-        SemanticSearch = true,
-        HybridSearch = true
-    });
-
-Expect.Equal(SearchBackend.HybridVector, selector.Select(fullHostCapabilities.Search), "Search backend selector should use hybrid/vector mode when full-host capabilities enable it.", failures);
-
-var degradedFullHostCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
-    fullHostCapabilities.Search,
-    new SearchInfrastructureCapabilities(
-        SupportsSqlFullText: true,
-        SupportsHybridSearch: false));
-Expect.False(degradedFullHostCapabilities.UseHybridSearch, "Effective search capabilities should disable hybrid search when OpenSearch runtime support is unavailable.", failures);
-Expect.False(degradedFullHostCapabilities.UseSemanticSearch, "Effective search capabilities should disable semantic search when OpenSearch runtime support is unavailable.", failures);
-Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(degradedFullHostCapabilities), "Search backend selector should fall back to the projection index when hybrid search is configured but unavailable.", failures);
-
-var llmPolicy = LocalLlmExecutionPolicy.For(RuntimeProfile.DevLaptop);
-Expect.Equal(AiActivationMode.OnDemand, llmPolicy.ActivationMode, "Local LLM execution policy should stay on-demand for the laptop profile.", failures);
-Expect.Equal(1, llmPolicy.MaxConcurrency, "Laptop-first AI worker must stay single-flight.", failures);
-
-var ollamaProbeHandler = new StubSequenceHttpMessageHandler(_ =>
-    new HttpResponseMessage(HttpStatusCode.OK)
-    {
-        Content = new StringContent("""
-            {
-              "models": [
-                { "name": "llama3.2:1b" },
-                { "name": "nomic-embed-text:latest" }
-              ]
-            }
-            """, Encoding.UTF8, "application/json")
-    });
-var ollamaProbeAvailability = await OllamaAvailabilityProbe.CheckAsync(
-    new HttpClient(ollamaProbeHandler)
-    {
-        BaseAddress = new Uri("http://127.0.0.1:11434")
-    },
-    "llama3.2:1b",
-    CancellationToken.None);
-
-Expect.True(ollamaProbeAvailability.ServerReachable, "Ollama availability probe should mark the local runtime reachable when /api/tags returns successfully.", failures);
-Expect.True(ollamaProbeAvailability.ModelAvailable, "Ollama availability probe should detect the configured model in the returned model list.", failures);
-
-var ollamaEmbeddingProbeAvailability = await OllamaAvailabilityProbe.CheckAsync(
-    new HttpClient(new StubSequenceHttpMessageHandler(_ =>
-        new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent("""
-                {
-                  "models": [
-                    { "name": "nomic-embed-text:latest" }
-                  ]
-                }
-                """, Encoding.UTF8, "application/json")
-        }))
-    {
-        BaseAddress = new Uri("http://127.0.0.1:11434")
-    },
-    "nomic-embed-text",
-    CancellationToken.None);
-
-Expect.True(ollamaEmbeddingProbeAvailability.ModelAvailable, "Ollama availability probe should treat an untagged configured model as matching the :latest tag exposed by Ollama.", failures);
-
-var messagingDiagnosticsQueryService = new MessagingDiagnosticsQueryService(
-    new StubMessagingDiagnosticsStore(
-        new MessagingDiagnosticsSnapshot(
-            true,
-            new OutboxDiagnosticsSnapshot(
-                4,
-                2,
-                1,
-                1,
-                2,
-                3,
-                new DateTimeOffset(2026, 03, 27, 10, 0, 0, TimeSpan.Zero),
-                new DateTimeOffset(2026, 03, 27, 10, 15, 0, TimeSpan.Zero),
-                [
-                    new OutboxMessageTypeDiagnosticsSnapshot("LawWatcher.IntegrationApi.Contracts.ReplayRequestedIntegrationEvent", 2, 1, 1, 0, 1, 1),
-                    new OutboxMessageTypeDiagnosticsSnapshot("LawWatcher.IntegrationApi.Contracts.BackfillRequestedIntegrationEvent", 2, 1, 0, 1, 1, 3)
-                ]),
-            new InboxDiagnosticsSnapshot(
-                3,
-                [
-                    new InboxConsumerDiagnosticsSnapshot("worker-lite.replay-requested", 2, new DateTimeOffset(2026, 03, 27, 10, 5, 0, TimeSpan.Zero)),
-                    new InboxConsumerDiagnosticsSnapshot("worker-lite.backfill-requested", 1, new DateTimeOffset(2026, 03, 27, 10, 7, 0, TimeSpan.Zero))
-                ]))),
-    new StubBrokerDiagnosticsStore(
-        new BrokerDiagnosticsSnapshot(
-            true,
-            4,
-            2,
-            3,
-            2,
-            1,
-            1,
-            0,
-            2,
-            [
-                new BrokerEndpointDiagnosticsSnapshot(
-                    "ai-enrichment-requested",
-                    "ai-enrichment-requested",
-                    "running",
-                    1,
-                    2,
-                    1,
-                    1,
-                    0,
-                    0,
-                    1),
-                new BrokerEndpointDiagnosticsSnapshot(
-                    "replay-requested",
-                    "replay-requested",
-                    "running",
-                    1,
-                    1,
-                    1,
-                    0,
-                    1,
-                    0,
-                    1)
-            ])),
-    sqlOutboxEnabled: true,
-    brokerEnabled: true);
-var messagingDiagnostics = await messagingDiagnosticsQueryService.GetDiagnosticsAsync(CancellationToken.None);
-
-Expect.Equal("rabbitmq", messagingDiagnostics.DeliveryMode, "Messaging diagnostics query service should report RabbitMQ as the primary delivery mode when broker transport is configured.", failures);
-Expect.Equal("fallback", messagingDiagnostics.PollerMode, "Messaging diagnostics query service should describe SQL polling as fallback-only in broker mode.", failures);
-Expect.True(messagingDiagnostics.DiagnosticsAvailable, "Messaging diagnostics query service should preserve store availability in the response contract.", failures);
-Expect.Equal(1, messagingDiagnostics.Outbox.DeferredCount, "Messaging diagnostics query service should map deferred outbox counts into the response contract.", failures);
-Expect.Equal(2, messagingDiagnostics.Outbox.MessageTypes.Count, "Messaging diagnostics query service should expose grouped per-message-type outbox diagnostics.", failures);
-Expect.Equal("worker-lite.replay-requested", messagingDiagnostics.Inbox.Consumers.First().ConsumerName, "Messaging diagnostics query service should preserve inbox consumer names in the response contract.", failures);
-Expect.True(messagingDiagnostics.Broker.DiagnosticsAvailable, "Messaging diagnostics query service should expose broker telemetry availability when the broker diagnostics adapter is configured.", failures);
-Expect.Equal(1, messagingDiagnostics.Broker.FaultCount, "Messaging diagnostics query service should expose broker fault queue counts in the response contract.", failures);
-Expect.Equal(2L, messagingDiagnostics.Broker.RedeliveryCount, "Messaging diagnostics query service should aggregate broker redelivery counts in the response contract.", failures);
-Expect.Equal("ai-enrichment-requested", messagingDiagnostics.Broker.Endpoints.First().EndpointName, "Messaging diagnostics query service should preserve broker endpoint names in the response contract.", failures);
-Expect.Equal("running", messagingDiagnostics.Broker.Endpoints.First().Status, "Messaging diagnostics query service should preserve broker consumer status in the response contract.", failures);
-
-var retentionMaintenanceCommandService = new RetentionMaintenanceCommandService(
-    new StubRetentionMaintenanceStore(
-        new RetentionMaintenanceExecutionResult(
-            true,
-            new DateTimeOffset(2026, 03, 27, 11, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 03, 20, 11, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 03, 13, 11, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 02, 25, 11, 0, 0, TimeSpan.Zero),
-            7,
-            11,
-            5,
-            new DateTimeOffset(2026, 02, 27, 11, 0, 0, TimeSpan.Zero),
-            9,
-            true,
-            "search_documents older than the requested retention window were pruned by indexed_at_utc.",
-            new DateTimeOffset(2026, 03, 06, 11, 0, 0, TimeSpan.Zero),
-            4,
-            true,
-            "completed and failed ai_enrichment_tasks older than the requested retention window were pruned by terminal timestamps.",
-            new DateTimeOffset(2026, 03, 01, 11, 0, 0, TimeSpan.Zero),
-            0,
-            false,
-            "Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.")));
-var retentionMaintenance = await retentionMaintenanceCommandService.RunAsync(
-    new RunRetentionMaintenanceCommand(
-        168,
-        336,
-        720,
-        672,
-        504,
-        336)
-    {
-        RequestedAtUtc = new DateTimeOffset(2026, 03, 27, 11, 0, 0, TimeSpan.Zero)
-    },
-    CancellationToken.None);
-
-Expect.True(retentionMaintenance.MaintenanceAvailable, "Retention maintenance command service should preserve store availability in the response contract.", failures);
-Expect.Equal(7, retentionMaintenance.DeletedPublishedOutboxCount, "Retention maintenance command service should map deleted published outbox rows into the response contract.", failures);
-Expect.Equal(11, retentionMaintenance.DeletedProcessedInboxCount, "Retention maintenance command service should map deleted processed inbox rows into the response contract.", failures);
-Expect.Equal(5, retentionMaintenance.DeletedEventFeedCount, "Retention maintenance command service should map deleted event-feed rows into the response contract.", failures);
-Expect.Equal(new DateTimeOffset(2026, 02, 27, 11, 0, 0, TimeSpan.Zero), retentionMaintenance.SearchDocumentsCutoffUtc ?? DateTimeOffset.MinValue, "Retention maintenance command service should map the search-document retention cutoff into the response contract.", failures);
-Expect.Equal(9, retentionMaintenance.DeletedSearchDocumentsCount, "Retention maintenance command service should map deleted search-document rows into the response contract.", failures);
-Expect.True(retentionMaintenance.SearchDocumentsRetentionApplied, "Retention maintenance command service should report when search-document retention was applied.", failures);
-Expect.Equal("search_documents older than the requested retention window were pruned by indexed_at_utc.", retentionMaintenance.SearchDocumentsRetentionReason, "Retention maintenance command service should preserve the explicit search-document retention reason.", failures);
-Expect.Equal(new DateTimeOffset(2026, 03, 06, 11, 0, 0, TimeSpan.Zero), retentionMaintenance.AiTasksCutoffUtc ?? DateTimeOffset.MinValue, "Retention maintenance command service should map the AI-task retention cutoff into the response contract.", failures);
-Expect.Equal(4, retentionMaintenance.DeletedAiTasksCount, "Retention maintenance command service should map deleted AI-task rows into the response contract.", failures);
-Expect.True(retentionMaintenance.AiTasksRetentionApplied, "Retention maintenance command service should report when AI-task retention was applied.", failures);
-Expect.Equal("completed and failed ai_enrichment_tasks older than the requested retention window were pruned by terminal timestamps.", retentionMaintenance.AiTasksRetentionReason, "Retention maintenance command service should preserve the explicit AI-task retention reason.", failures);
-Expect.Equal(new DateTimeOffset(2026, 03, 01, 11, 0, 0, TimeSpan.Zero), retentionMaintenance.DocumentArtifactsCutoffUtc ?? DateTimeOffset.MinValue, "Retention maintenance command service should map the requested document-artifact retention cutoff into the response contract even when cleanup is unavailable.", failures);
-Expect.Equal(0, retentionMaintenance.DeletedDocumentArtifactsCount, "Retention maintenance command service should preserve deleted document-artifact counts in the response contract.", failures);
-Expect.False(retentionMaintenance.DocumentArtifactsRetentionApplied, "Retention maintenance command service should report when document-artifact retention could not be applied safely.", failures);
-Expect.Equal("Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.", retentionMaintenance.DocumentArtifactsRetentionReason, "Retention maintenance command service should preserve the explicit document-artifact retention reason.", failures);
-
-var ollamaLlmHandler = new StubSequenceHttpMessageHandler(request =>
-{
-    var requestBody = request.Content is null
-        ? string.Empty
-        : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-
-    if (request.Method != HttpMethod.Post ||
-        request.RequestUri?.AbsolutePath != "/api/generate" ||
-        !requestBody.Contains("\"model\":\"llama3.2:1b\"", StringComparison.Ordinal) ||
-        !requestBody.Contains("\"stream\":false", StringComparison.Ordinal))
-    {
-        return new HttpResponseMessage(HttpStatusCode.BadRequest)
-        {
-            Content = new StringContent("{\"error\":\"unexpected request\"}", Encoding.UTF8, "application/json")
-        };
-    }
-
-    return new HttpResponseMessage(HttpStatusCode.OK)
-    {
-        Content = new StringContent("""
-            {
-              "model": "llama3.2:1b",
-              "response": "Zmieniony akt wprowadza aktualizacje VAT i JPK.",
-              "done": true
-            }
-            """, Encoding.UTF8, "application/json")
-    };
-});
-var ollamaCompletion = await new OllamaLlmService(
-    new HttpClient(ollamaLlmHandler)
-    {
-        BaseAddress = new Uri("http://127.0.0.1:11434")
-    },
-    "llama3.2:1b",
-    "120s").CompleteAsync("Podsumuj zmiany VAT i JPK.", CancellationToken.None);
-
-Expect.Equal("llama3.2:1b", ollamaCompletion.Model, "Ollama LLM adapter should preserve the runtime model identifier returned by the backend.", failures);
-Expect.Equal("Zmieniony akt wprowadza aktualizacje VAT i JPK.", ollamaCompletion.Content, "Ollama LLM adapter should project the generated text from the backend response.", failures);
-Expect.Equal(0, ollamaCompletion.Citations.Count, "Ollama LLM adapter should not invent citations when the backend response does not provide them.", failures);
-
-var resolvedStateRoot = StateStoragePathResolver.ResolveRoot(
-    new StateStorageOptions
-    {
-        StateRoot = Path.Combine("..", "..", "..", "artifacts", "state")
-    },
-    Path.Combine(
-        Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? Path.DirectorySeparatorChar.ToString(),
-        "repos",
-        "LawWatcher",
-        "src",
-        "Server",
-        "LawWatcher.Api"));
-var statePaths = LawWatcherStatePaths.ForRoot(resolvedStateRoot);
-var expectedRepositoryRoot = Path.Combine(
-    Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? Path.DirectorySeparatorChar.ToString(),
-    "repos",
-    "LawWatcher");
-var expectedStateRoot = Path.GetFullPath(Path.Combine(expectedRepositoryRoot, "artifacts", "state"));
-
-Expect.Equal(
-    expectedStateRoot,
-    resolvedStateRoot,
-    "State storage path resolver should normalize the shared root relative to the host content root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "ai-enrichment", "tasks"),
-    statePaths.AiTasksRoot,
-    "State storage paths should derive a stable AI task root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "integration-api", "replays"),
-    statePaths.ReplaysRoot,
-    "State storage paths should derive a stable replay root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "integration-api", "backfills"),
-    statePaths.BackfillsRoot,
-    "State storage paths should derive a stable backfill root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "taxonomy-and-profiles", "subscriptions"),
-    statePaths.ProfileSubscriptionsRoot,
-    "State storage paths should derive a stable subscription root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "integration-api", "webhook-registrations"),
-    statePaths.WebhookRegistrationsRoot,
-    "State storage paths should derive a stable webhook registration root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "notifications", "bill-alerts"),
-    statePaths.BillAlertsRoot,
-    "State storage paths should derive a stable bill alert root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "notifications", "dispatches"),
-    statePaths.NotificationDispatchesRoot,
-    "State storage paths should derive a stable notification dispatch root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "integration-api", "webhook-dispatches"),
-    statePaths.WebhookEventDispatchesRoot,
-    "State storage paths should derive a stable webhook event dispatch root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "taxonomy-and-profiles", "monitoring-profiles"),
-    statePaths.MonitoringProfilesRoot,
-    "State storage paths should derive a stable monitoring profile root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "legislative-intake", "bills"),
-    statePaths.BillsRoot,
-    "State storage paths should derive a stable imported bill root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "legislative-process", "processes"),
-    statePaths.ProcessesRoot,
-    "State storage paths should derive a stable legislative process root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "legal-corpus", "acts"),
-    statePaths.ActsRoot,
-    "State storage paths should derive a stable published act root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "identity-and-access", "api-clients"),
-    statePaths.ApiClientsRoot,
-    "State storage paths should derive a stable API client root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "identity-and-access", "operator-accounts"),
-    statePaths.OperatorAccountsRoot,
-    "State storage paths should derive a stable operator account root from the shared state root.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "search", "documents"),
-    statePaths.SearchIndexRoot,
-    "State storage paths should derive a stable search index root from the shared state root.",
-    failures);
-
-var objectStorageOptions = new ObjectStorageOptions
-{
-    LocalDocumentsRoot = Path.Combine("..", "..", "artifacts", "documents"),
-    Minio = new S3CompatibleDocumentStoreOptions
-    {
-        Endpoint = "http://minio:9000",
-        AccessKey = "lawwatcher",
-        SecretKey = "ChangeMe!123456"
-    }
-};
-Expect.Equal(
-    DocumentStoreBackend.S3Compatible,
-    DocumentStoreRuntimeResolver.Select(objectStorageOptions),
-    "Document store runtime resolver should choose the S3-compatible backend when MinIO credentials are configured.",
-    failures);
-Expect.Equal(
-    Path.GetFullPath(Path.Combine(expectedRepositoryRoot, "src", "artifacts", "documents")),
-    DocumentStoreRuntimeResolver.ResolveLocalDocumentsRoot(
-        objectStorageOptions,
-        Path.Combine(expectedRepositoryRoot, "src", "Server", "LawWatcher.Api")),
-    "Document store runtime resolver should normalize the local fallback root relative to the host content root.",
-    failures);
-Expect.False(
-    new S3CompatibleDocumentStoreOptions
-    {
-        Endpoint = "http://minio:9000",
-        AccessKey = "lawwatcher",
-        SecretKey = ""
-    }.IsConfigured(),
-    "S3-compatible document store options should remain disabled until endpoint, access key and secret key are all present.",
-    failures);
-Expect.Equal(
-    Path.Combine(expectedStateRoot, "integration-api", "events"),
-    statePaths.EventFeedRoot,
-    "State storage paths should derive a stable event feed root from the shared state root.",
-    failures);
+await RuntimeInfrastructureScenarios.RunAsync(failures);
 
 var createdAt = new DateTimeOffset(2026, 03, 25, 10, 00, 00, TimeSpan.Zero);
 var monitoringProfileId = new MonitoringProfileId(Guid.Parse("D9A3E76F-739D-42AD-9A25-4FA51E627E21"));
@@ -1760,6 +1339,109 @@ Expect.True(
     "File-backed search index should no longer return removed alert documents after reload.",
     failures);
 
+var projectedDocumentArtifactsRoot = Path.Combine(durableStateRoot, "projected-document-artifacts");
+var projectedDocumentArtifactCatalog = new FileBackedDocumentArtifactCatalogStore(projectedDocumentArtifactsRoot);
+await projectedDocumentArtifactCatalog.UpsertAsync(
+    new DocumentArtifactCatalogEntry(
+        Guid.Parse("51F90C93-B493-4400-95CB-74BF20F04553"),
+        "act",
+        listedActs[0].Id,
+        "text",
+        LegalCorpusArtifactStorage.Bucket,
+        "acts/DU/2026/501/text.pdf",
+        "application/pdf",
+        DocumentArtifactStorage.ExtractedTextKind,
+        DocumentArtifactStorage.Bucket,
+        "act/4923/extracted.txt",
+        DocumentArtifactStorage.ExtractedTextContentType,
+        "Dokument zrodlowy CIT przewiduje korekty rozliczen zaliczek oraz wejscie w zycie 1 kwietnia 2026 roku.",
+        new DateTimeOffset(2026, 03, 27, 10, 15, 0, TimeSpan.Zero)),
+    CancellationToken.None);
+
+var projectedSearchIndex = new InMemorySearchDocumentIndex();
+var projectedSearchRefreshService = new SearchProjectionRefreshService(
+    billsQueryService,
+    processesQueryService,
+    actsQueryService,
+    new MonitoringProfilesQueryService(new StubMonitoringProfileReadRepository(
+        profiles
+            .Select(profile => new MonitoringProfileReadModel(profile.Id, profile.Name, profile.AlertPolicy, profile.Keywords))
+            .ToArray())),
+    alertsQueryService,
+    projectedDocumentArtifactCatalog,
+    new SearchIndexingService(projectedSearchIndex));
+var projectedInboxStore = new InMemoryInboxStore();
+var documentTextProjectionMessageHandler = new DocumentTextProjectionMessageHandler(
+    projectedSearchRefreshService,
+    projectedInboxStore);
+var documentTextExtractedIntegrationEvent = new DocumentTextExtractedIntegrationEvent(
+    Guid.Parse("C8A6F9D3-A13E-404C-BE70-39E892D1B06D"),
+    new DateTimeOffset(2026, 03, 27, 10, 20, 0, TimeSpan.Zero),
+    "act",
+    listedActs[0].Id,
+    "text",
+    LegalCorpusArtifactStorage.Bucket,
+    "acts/DU/2026/501/text.pdf",
+    DocumentArtifactStorage.Bucket,
+    "act/4923/extracted.txt");
+
+var firstDocumentTextProjectionResult = await documentTextProjectionMessageHandler.HandleAsync(
+    documentTextExtractedIntegrationEvent,
+    CancellationToken.None);
+var secondDocumentTextProjectionResult = await documentTextProjectionMessageHandler.HandleAsync(
+    documentTextExtractedIntegrationEvent,
+    CancellationToken.None);
+var projectedSearchHits = (await new SearchQueryService(projectedSearchIndex).SearchAsync("zaliczek", CancellationToken.None)).Hits.ToArray();
+
+Expect.True(firstDocumentTextProjectionResult.HasRefreshed, "Document-text projection handler should rebuild the search projection when a fresh extracted-text event arrives.", failures);
+Expect.False(secondDocumentTextProjectionResult.HasRefreshed, "Document-text projection handler should stay idempotent for already processed extracted-text events.", failures);
+Expect.True(
+    projectedSearchHits.Any(hit => string.Equals(hit.Type, "act", StringComparison.OrdinalIgnoreCase)),
+    "Search projection refresh should index extracted document text so act hits can be found by OCR-derived phrases.",
+    failures);
+
+var documentProcessingDocumentsRoot = Path.Combine(durableStateRoot, "document-processing", "documents");
+var documentProcessingCatalogRoot = Path.Combine(durableStateRoot, "document-processing", "catalog");
+var documentProcessingDocumentStore = new LocalFileDocumentStore(documentProcessingDocumentsRoot);
+var documentProcessingCatalog = new FileBackedDocumentArtifactCatalogStore(documentProcessingCatalogRoot);
+var documentProcessingPublisher = new RecordingIntegrationEventPublisher();
+await using (var processingSourceContent = new MemoryStream(Encoding.UTF8.GetBytes("Art. 1. Dokument OCR zawiera korekte zaliczek CIT."), writable: false))
+{
+    await documentProcessingDocumentStore.PutAsync(
+        new DocumentWriteRequest(
+            LegalCorpusArtifactStorage.Bucket,
+            "acts/2026/ocr-source.txt",
+            "text/plain",
+            processingSourceContent),
+        CancellationToken.None);
+}
+
+var documentProcessingService = new DocumentProcessingService(
+    documentProcessingDocumentStore,
+    new ContainerizedDocumentOcrService(documentProcessingDocumentStore),
+    documentProcessingCatalog,
+    documentProcessingPublisher);
+var processedDocumentResult = await documentProcessingService.ProcessAsync(
+    new ActArtifactAttachedIntegrationEvent(
+        Guid.Parse("A737C580-EBA6-4218-8DB1-06E5DE3AA3E8"),
+        new DateTimeOffset(2026, 03, 27, 10, 25, 0, TimeSpan.Zero),
+        listedActs[0].Id,
+        "text",
+        "acts/2026/ocr-source.txt"),
+    CancellationToken.None);
+var processedDocumentCatalogEntry = await documentProcessingCatalog.GetBySourceAsync(
+    LegalCorpusArtifactStorage.Bucket,
+    "acts/2026/ocr-source.txt",
+    CancellationToken.None);
+
+Expect.True(processedDocumentResult.HasProcessedDocument, "Document processing service should create a derived text artifact for attached source documents.", failures);
+Expect.False(processedDocumentResult.WasAlreadyProcessed, "Document processing service should report the first processing pass as newly completed.", failures);
+Expect.Equal(DocumentArtifactStorage.Bucket, processedDocumentCatalogEntry?.DerivedBucket ?? string.Empty, "Document processing service should store derived text artifacts in the dedicated derived-artifact bucket.", failures);
+Expect.True(
+    documentProcessingPublisher.PublishedEvents.OfType<DocumentTextExtractedIntegrationEvent>().Any(),
+    "Document processing service should publish a document-text-extracted integration event after persisting the derived artifact.",
+    failures);
+
 var aiRepository = new InMemoryAiEnrichmentTaskRepository();
 var aiProjection = new InMemoryAiEnrichmentTaskProjectionStore();
 var aiCommandService = new AiEnrichmentCommandService(aiRepository, aiProjection);
@@ -1794,26 +1476,32 @@ Expect.True((completedTask.Content ?? string.Empty).Contains(listedBills[1].Titl
 Expect.SequenceEqual([listedBills[1].SourceUrl], completedTask.Citations, "Completed AI enrichment should extract source citations from the local prompt.", failures);
 Expect.Equal("act", queuedTask.SubjectType, "AI query service should leave unprocessed tasks queued for later worker execution.", failures);
 
-var groundedAiDocumentsRoot = Path.Combine(durableStateRoot, "ai-documents");
-var groundedDocumentStore = new LocalFileDocumentStore(groundedAiDocumentsRoot);
+var groundedAiCatalogRoot = Path.Combine(durableStateRoot, "ai-document-artifacts");
 var groundedArtifactKey = "acts/DU/2026/501/text.pdf";
-await using (var groundedArtifactContent = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Dokument zrodlowy CIT przewiduje wejscie w zycie 1 kwietnia 2026 roku oraz korekty rozliczen zaliczek."), writable: false))
-{
-    await groundedDocumentStore.PutAsync(
-        new DocumentWriteRequest(
-            LegalCorpusArtifactStorage.Bucket,
-            groundedArtifactKey,
-            LegalCorpusArtifactStorage.GuessContentType(groundedArtifactKey),
-            groundedArtifactContent),
-        CancellationToken.None);
-}
+var groundedDocumentArtifactCatalog = new FileBackedDocumentArtifactCatalogStore(groundedAiCatalogRoot);
+await groundedDocumentArtifactCatalog.UpsertAsync(
+    new DocumentArtifactCatalogEntry(
+        Guid.Parse("8E267191-F6C0-4B49-B6AB-E9727E8B7EF3"),
+        "act",
+        Guid.Parse("4923A708-2B89-4F17-93A9-0AA3A59C2056"),
+        "text",
+        LegalCorpusArtifactStorage.Bucket,
+        groundedArtifactKey,
+        LegalCorpusArtifactStorage.GuessContentType(groundedArtifactKey),
+        DocumentArtifactStorage.ExtractedTextKind,
+        DocumentArtifactStorage.Bucket,
+        "acts/DU/2026/501/text.extracted.txt",
+        DocumentArtifactStorage.ExtractedTextContentType,
+        "Dokument zrodlowy CIT przewiduje wejscie w zycie 1 kwietnia 2026 roku oraz korekty rozliczen zaliczek.",
+        new DateTimeOffset(2026, 03, 27, 10, 30, 0, TimeSpan.Zero)),
+    CancellationToken.None);
 
 var groundedAiRepository = new InMemoryAiEnrichmentTaskRepository();
 var groundedAiProjection = new InMemoryAiEnrichmentTaskProjectionStore();
 var groundedAiCommandService = new AiEnrichmentCommandService(groundedAiRepository, groundedAiProjection);
 var groundedPromptAugmentor = new PublishedActAiPromptAugmentor(
     actRepository,
-    new PlainTextOcrService(groundedDocumentStore));
+    groundedDocumentArtifactCatalog);
 var groundedAugmentation = await groundedPromptAugmentor.AugmentAsync(
     AiTaskSubject.Create(
         "act",
@@ -1827,6 +1515,11 @@ var groundedAiExecutionService = new AiEnrichmentExecutionService(
     new OnDemandLocalLlmService(),
     groundedPromptAugmentor);
 var groundedAiQueryService = new AiEnrichmentTasksQueryService(groundedAiProjection);
+var retryableGroundedDocumentArtifactCatalog = new FileBackedDocumentArtifactCatalogStore(
+    Path.Combine(durableStateRoot, "missing-ai-document-artifacts"));
+var missingGroundedPromptAugmentor = new PublishedActAiPromptAugmentor(
+    actRepository,
+    retryableGroundedDocumentArtifactCatalog);
 
 await groundedAiCommandService.RequestAsync(new RequestAiEnrichmentCommand(
     Guid.Parse("65175E86-C0B4-4279-9A38-6D55699E3A1F"),
@@ -1839,6 +1532,51 @@ await groundedAiCommandService.RequestAsync(new RequestAiEnrichmentCommand(
 var groundedAiResult = await groundedAiExecutionService.ProcessNextQueuedAsync(CancellationToken.None);
 var groundedAiTasks = await groundedAiQueryService.GetTasksAsync(CancellationToken.None);
 var groundedCompletedTask = groundedAiTasks.Single();
+var missingDerivedTextRaised = false;
+var retryableGroundedAiRepository = new InMemoryAiEnrichmentTaskRepository();
+var retryableGroundedAiProjection = new InMemoryAiEnrichmentTaskProjectionStore();
+var retryableGroundedAiCommandService = new AiEnrichmentCommandService(retryableGroundedAiRepository, retryableGroundedAiProjection);
+var retryableGroundedAiExecutionService = new AiEnrichmentExecutionService(
+    retryableGroundedAiRepository,
+    retryableGroundedAiProjection,
+    new OnDemandLocalLlmService(),
+    missingGroundedPromptAugmentor);
+var missingDerivedTextStayedQueued = false;
+try
+{
+    await missingGroundedPromptAugmentor.AugmentAsync(
+        AiTaskSubject.Create(
+            "act",
+            Guid.Parse("4923A708-2B89-4F17-93A9-0AA3A59C2056"),
+            "Ustawa z dnia 28 marca 2026 r. o zmianie ustawy o CIT"),
+        "Podsumuj opublikowany akt i uwzglednij material zrodlowy.",
+        CancellationToken.None);
+}
+catch (DerivedDocumentTextNotReadyException)
+{
+    missingDerivedTextRaised = true;
+}
+
+await retryableGroundedAiCommandService.RequestAsync(new RequestAiEnrichmentCommand(
+    Guid.Parse("8C4A18A2-1607-4A21-ADAB-31858F29C481"),
+    "act-summary",
+    "act",
+    Guid.Parse("4923A708-2B89-4F17-93A9-0AA3A59C2056"),
+    "Ustawa z dnia 28 marca 2026 r. o zmianie ustawy o CIT",
+    "Podsumuj opublikowany akt i uwzglednij material zrodlowy."), CancellationToken.None);
+
+try
+{
+    await retryableGroundedAiExecutionService.ProcessNextQueuedAsync(CancellationToken.None);
+}
+catch (DerivedDocumentTextNotReadyException)
+{
+    var queuedRetryableTask = (await new AiEnrichmentTasksQueryService(retryableGroundedAiProjection).GetTasksAsync(CancellationToken.None)).Single();
+    missingDerivedTextStayedQueued =
+        string.Equals(queuedRetryableTask.Status, "queued", StringComparison.OrdinalIgnoreCase)
+        && queuedRetryableTask.StartedAtUtc is null
+        && queuedRetryableTask.FailedAtUtc is null;
+}
 
 Expect.True(groundedAiResult.HasProcessedTask, "AI execution service should process act tasks grounded in stored source artifacts.", failures);
 Expect.Equal("completed", groundedCompletedTask.Status, "Grounded act enrichment should complete when the source artifact is available in the document store.", failures);
@@ -1861,6 +1599,101 @@ Expect.True(
 Expect.True(
     groundedCompletedTask.Citations.Contains("document://legal-corpus/acts/DU/2026/501/text.pdf", StringComparer.OrdinalIgnoreCase),
     "Grounded act enrichment should cite the stored act artifact reference.",
+    failures);
+Expect.True(
+    missingDerivedTextRaised,
+    "Published act prompt augmentation should raise a retryable domain exception when the derived text artifact is not ready yet.",
+    failures);
+Expect.True(
+    missingDerivedTextStayedQueued,
+    "AI execution service should leave act tasks queued when derived text artifacts are not ready yet, so broker retry and redelivery can recover the flow.",
+    failures);
+Expect.Equal(
+    TimeSpan.FromSeconds(5),
+    BrokerConsumerResiliency.DelayedRedeliveryIntervals[0],
+    "Broker resiliency should retry OCR-dependent consumers quickly enough to recover from document-text readiness races in the Docker smoke lane.",
+    failures);
+Expect.Equal(
+    TimeSpan.FromMinutes(1),
+    BrokerConsumerResiliency.DelayedRedeliveryIntervals[^1],
+    "Broker resiliency should cap delayed redelivery inside the supported smoke timeout instead of waiting multiple extra minutes.",
+    failures);
+Expect.Equal(
+    3,
+    BrokerConsumerResiliency.ImmediateRetryCount,
+    "Broker resiliency should keep a short immediate retry burst before delayed redelivery.",
+    failures);
+
+await retryableGroundedDocumentArtifactCatalog.UpsertAsync(
+    new DocumentArtifactCatalogEntry(
+        Guid.Parse("5A824C03-3042-44AE-B820-19166EE9EA7A"),
+        "act",
+        Guid.Parse("4923A708-2B89-4F17-93A9-0AA3A59C2056"),
+        "text",
+        LegalCorpusArtifactStorage.Bucket,
+        groundedArtifactKey,
+        LegalCorpusArtifactStorage.GuessContentType(groundedArtifactKey),
+        DocumentArtifactStorage.ExtractedTextKind,
+        DocumentArtifactStorage.Bucket,
+        "acts/DU/2026/501/text.recovered.txt",
+        DocumentArtifactStorage.ExtractedTextContentType,
+        "Dokument zrodlowy CIT przewiduje korekty rozliczen zaliczek i odzyskanie przetwarzania po gotowosci OCR.",
+        new DateTimeOffset(2026, 03, 27, 10, 35, 0, TimeSpan.Zero)),
+    CancellationToken.None);
+
+var documentTextRecoveryService = new DocumentTextRecoveryService(
+    retryableGroundedAiProjection,
+    retryableGroundedAiExecutionService);
+var documentTextRecoveryInboxStore = new InMemoryInboxStore();
+var documentTextRecoveryHandler = new DocumentTextRecoveryMessageHandler(
+    documentTextRecoveryService,
+    documentTextRecoveryInboxStore);
+var documentTextRecoveryEvent = new DocumentTextExtractedIntegrationEvent(
+    Guid.Parse("7E1F6AF1-3B91-47A0-9E7A-C71A7EBD8C4B"),
+    new DateTimeOffset(2026, 03, 27, 10, 36, 0, TimeSpan.Zero),
+    "act",
+    Guid.Parse("4923A708-2B89-4F17-93A9-0AA3A59C2056"),
+    "text",
+    LegalCorpusArtifactStorage.Bucket,
+    groundedArtifactKey,
+    DocumentArtifactStorage.Bucket,
+    "acts/DU/2026/501/text.recovered.txt");
+var firstDocumentTextRecoveryResult = await documentTextRecoveryHandler.HandleAsync(
+    documentTextRecoveryEvent,
+    CancellationToken.None);
+var secondDocumentTextRecoveryResult = await documentTextRecoveryHandler.HandleAsync(
+    documentTextRecoveryEvent,
+    CancellationToken.None);
+var recoveredGroundedTask = (await new AiEnrichmentTasksQueryService(retryableGroundedAiProjection).GetTasksAsync(CancellationToken.None)).Single();
+
+Expect.Equal(
+    1,
+    firstDocumentTextRecoveryResult.MatchingQueuedTaskCount,
+    "Document-text recovery should target queued AI tasks for the same owner when the derived artifact becomes ready.",
+    failures);
+Expect.Equal(
+    1,
+    firstDocumentTextRecoveryResult.CompletedTaskCount,
+    "Document-text recovery should complete the queued AI task once the derived text artifact exists.",
+    failures);
+Expect.False(
+    firstDocumentTextRecoveryResult.HasRemainingQueuedTasks,
+    "Document-text recovery should drain matching queued AI tasks after the derived text artifact becomes available.",
+    failures);
+Expect.Equal(
+    "completed",
+    recoveredGroundedTask.Status,
+    "Document-text recovery should move the queued AI task to completed after the OCR/text artifact is ready.",
+    failures);
+Expect.Equal(
+    0,
+    secondDocumentTextRecoveryResult.MatchingQueuedTaskCount,
+    "Document-text recovery broker handling should stay idempotent for already processed extracted-text events.",
+    failures);
+Expect.Equal(
+    1,
+    documentTextRecoveryInboxStore.ProcessedMessages.Count,
+    "Document-text recovery broker handling should record inbox idempotency for processed extracted-text events.",
     failures);
 
 var batchedAiRepository = new InMemoryAiEnrichmentTaskRepository();
@@ -2165,6 +1998,83 @@ await enabledSeedApiClientBootstrap.StartAsync(CancellationToken.None);
 var enabledSeedApiClients = await new ApiClientsQueryService(enabledSeedApiClientProjection).GetApiClientsAsync(CancellationToken.None);
 Expect.Equal(2, enabledSeedApiClients.Count, "API-client bootstrap should seed the development/demo machine-to-machine clients only when explicitly enabled.", failures);
 
+var seedBootstrapBillRepository = new InMemoryImportedBillRepository();
+var seedBootstrapBillProjection = new InMemoryImportedBillProjectionStore();
+var seedBootstrapBillCommandService = new LegislativeIntakeCommandService(seedBootstrapBillRepository, seedBootstrapBillProjection);
+await seedBootstrapBillCommandService.RegisterAsync(new RegisterBillCommand(
+    Guid.Parse("C7C9A709-7912-40D5-A512-EF24098B1EB4"),
+    "sejm.gov.pl",
+    "X-310",
+    "https://www.sejm.gov.pl/Sejm10.nsf/PrzebiegProc.xsp?id=X-310",
+    "Ustawa o zmianie ustawy o CIT",
+    new DateOnly(2026, 03, 20)), CancellationToken.None);
+await seedBootstrapBillCommandService.RegisterAsync(new RegisterBillCommand(
+    Guid.Parse("5B5EC4B4-0BF8-4AD9-9ECB-AD4E7C1D4B14"),
+    "sejm.gov.pl",
+    "X-311",
+    "https://www.sejm.gov.pl/Sejm10.nsf/PrzebiegProc.xsp?id=X-311",
+    "Ustawa o zmianie ustawy o VAT",
+    new DateOnly(2026, 03, 21)), CancellationToken.None);
+
+var seedBootstrapActRepository = new InMemoryPublishedActRepository();
+var seedBootstrapActProjection = new InMemoryPublishedActProjectionStore();
+var seedBootstrapActCommandService = new LegalCorpusCommandService(seedBootstrapActRepository, seedBootstrapActProjection);
+var seedBootstrapActsQueryService = new ActsQueryService(seedBootstrapActProjection);
+var seedBootstrapBillsQueryService = new BillsQueryService(seedBootstrapBillProjection);
+
+await seedBootstrapActCommandService.RegisterAsync(new RegisterActCommand(
+    Guid.Parse("4F7610ED-6E4C-432F-8D95-1B3BE1E0DDBF"),
+    Guid.Parse("C7C9A709-7912-40D5-A512-EF24098B1EB4"),
+    "Ustawa o zmianie ustawy o CIT",
+    "X-310",
+    "https://eli.gov.pl/eli/DU/2026/501/ogl",
+    "Ustawa z dnia 28 marca 2026 r. o zmianie ustawy o CIT",
+    new DateOnly(2026, 03, 28),
+    new DateOnly(2026, 04, 01)), CancellationToken.None);
+await seedBootstrapActCommandService.RegisterAsync(new RegisterActCommand(
+    Guid.Parse("AA5177A4-D0A4-4B1E-8460-F7DDC6B01E89"),
+    Guid.Parse("5B5EC4B4-0BF8-4AD9-9ECB-AD4E7C1D4B14"),
+    "Ustawa o zmianie ustawy o VAT",
+    "X-311",
+    "https://eli.gov.pl/eli/DU/2026/502/ogl",
+    "Ustawa z dnia 29 marca 2026 r. o zmianie ustawy o VAT",
+    new DateOnly(2026, 03, 29),
+    new DateOnly(2026, 04, 05)), CancellationToken.None);
+
+var seedBootstrapDocumentRoot = Path.Combine(durableStateRoot, "legal-corpus-bootstrap-documents");
+var seedBootstrapDocumentStore = new LocalFileDocumentStore(seedBootstrapDocumentRoot);
+var legalCorpusBootstrap = new LegalCorpusBootstrapHostedService(
+    seedBootstrapActsQueryService,
+    seedBootstrapBillsQueryService,
+    seedBootstrapDocumentStore,
+    seedBootstrapActCommandService);
+await legalCorpusBootstrap.StartAsync(CancellationToken.None);
+
+var seededActsAfterBootstrap = await seedBootstrapActsQueryService.GetActsAsync(CancellationToken.None);
+var citSeededAct = seededActsAfterBootstrap.Single(act => act.Id == Guid.Parse("4F7610ED-6E4C-432F-8D95-1B3BE1E0DDBF"));
+var vatSeededAct = seededActsAfterBootstrap.Single(act => act.Id == Guid.Parse("AA5177A4-D0A4-4B1E-8460-F7DDC6B01E89"));
+await using var citSeededDocumentStream = await seedBootstrapDocumentStore.OpenReadAsync(
+    new StoredDocumentReference(LegalCorpusArtifactStorage.Bucket, "acts/DU/2026/501/text.txt", "text/plain; charset=utf-8"),
+    CancellationToken.None);
+using var citSeededReader = new StreamReader(citSeededDocumentStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false);
+var citSeededDocumentText = await citSeededReader.ReadToEndAsync();
+await using var vatSeededDocumentStream = await seedBootstrapDocumentStore.OpenReadAsync(
+    new StoredDocumentReference(LegalCorpusArtifactStorage.Bucket, "acts/DU/2026/502/text.txt", "text/plain; charset=utf-8"),
+    CancellationToken.None);
+using var vatSeededReader = new StreamReader(vatSeededDocumentStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false);
+var vatSeededDocumentText = await vatSeededReader.ReadToEndAsync();
+
+Expect.SequenceEqual(["text"], citSeededAct.ArtifactKinds, "Legal corpus bootstrap should reattach the seeded CIT source artifact when acts already exist in persistent storage.", failures);
+Expect.SequenceEqual(["text"], vatSeededAct.ArtifactKinds, "Legal corpus bootstrap should reattach the seeded VAT source artifact when acts already exist in persistent storage.", failures);
+Expect.True(
+    citSeededDocumentText.Contains("1 kwietnia 2026", StringComparison.Ordinal),
+    "Legal corpus bootstrap should still rewrite the seeded CIT source document on reruns so OCR can ground the default act flow.",
+    failures);
+Expect.True(
+    vatSeededDocumentText.Contains("5 kwietnia 2026", StringComparison.Ordinal),
+    "Legal corpus bootstrap should still rewrite the seeded VAT source document on reruns so OCR can ground the default act flow.",
+    failures);
+
 var operatorPasswordHasher = new Pbkdf2OperatorPasswordHasher();
 var operatorRepository = new InMemoryOperatorAccountRepository();
 var operatorProjection = new InMemoryOperatorAccountProjectionStore();
@@ -2345,14 +2255,14 @@ await using (var content = new MemoryStream(Encoding.UTF8.GetBytes("Art. 1. Zmia
     using var reader = new StreamReader(openedDocument, Encoding.UTF8, leaveOpen: false);
     var reopenedContent = await reader.ReadToEndAsync(CancellationToken.None);
 
-    var ocrService = new PlainTextOcrService(documentStore);
+    var ocrService = new ContainerizedDocumentOcrService(documentStore);
     var ocrResult = await ocrService.ExtractAsync(storedDocument, CancellationToken.None);
 
     Expect.Equal("documents", storedDocument.Bucket, "Local document store should preserve the requested bucket.", failures);
     Expect.Equal("acts/2026/502/text.txt", storedDocument.ObjectKey, "Local document store should preserve the requested object key.", failures);
     Expect.Equal("Art. 1. Zmiana ustawy o VAT.", reopenedContent, "Local document store should return the bytes that were written.", failures);
-    Expect.Equal("Art. 1. Zmiana ustawy o VAT.", ocrResult.ExtractedText, "Plain-text OCR adapter should extract text from stored documents.", failures);
-    Expect.Equal(0, ocrResult.Warnings.Count, "Plain-text OCR adapter should not emit warnings for UTF-8 text files.", failures);
+    Expect.Equal("Art. 1. Zmiana ustawy o VAT.", ocrResult.ExtractedText, "Containerized OCR adapter should preserve direct text extraction for plain-text source documents.", failures);
+    Expect.Equal(0, ocrResult.Warnings.Count, "Containerized OCR adapter should not emit OCR warnings for UTF-8 text files.", failures);
 }
 
 var embeddingService = new DeterministicEmbeddingService();
@@ -2483,316 +2393,4 @@ static string ComputeTestWebhookSignature(string payload, string secret)
 {
     using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
     return $"sha256={Convert.ToHexStringLower(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload)))}";
-}
-
-sealed class RecordingWebhookMessageHandler : HttpMessageHandler
-{
-    public HttpRequestMessage? Request { get; private set; }
-
-    public string? Payload { get; private set; }
-
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        Request = request;
-        Payload = request.Content is null
-            ? string.Empty
-            : await request.Content.ReadAsStringAsync(cancellationToken);
-
-        return new HttpResponseMessage(HttpStatusCode.Accepted)
-        {
-            Content = new StringContent("{}")
-        };
-    }
-}
-
-sealed class StubSequenceHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
-{
-    private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
-
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_responder(request));
-    }
-}
-
-static class Expect
-{
-    public static void Equal<T>(T expected, T actual, string message, List<string> failures)
-        where T : notnull
-    {
-        if (!EqualityComparer<T>.Default.Equals(expected, actual))
-        {
-            failures.Add($"{message} Expected: {expected}. Actual: {actual}.");
-        }
-    }
-
-    public static void True(bool condition, string message, List<string> failures)
-    {
-        if (!condition)
-        {
-            failures.Add(message);
-        }
-    }
-
-    public static void False(bool condition, string message, List<string> failures)
-    {
-        if (condition)
-        {
-            failures.Add(message);
-        }
-    }
-
-    public static void SequenceEqual<T>(IEnumerable<T> expected, IEnumerable<T> actual, string message, List<string> failures)
-        where T : notnull
-    {
-        if (!expected.SequenceEqual(actual))
-        {
-            failures.Add($"{message} Expected: [{string.Join(", ", expected)}]. Actual: [{string.Join(", ", actual)}].");
-        }
-    }
-}
-
-internal sealed class StubMonitoringProfileReadRepository(params MonitoringProfileReadModel[] profiles)
-    : IMonitoringProfileReadRepository
-{
-    private readonly IReadOnlyCollection<MonitoringProfileReadModel> _profiles = profiles;
-
-    public Task<IReadOnlyCollection<MonitoringProfileReadModel>> GetProfilesAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_profiles);
-    }
-}
-
-internal sealed class StubEventFeedSource(params EventFeedItem[] items)
-    : IEventFeedSource
-{
-    private readonly IReadOnlyCollection<EventFeedItem> _items = items;
-
-    public Task<IReadOnlyCollection<EventFeedItem>> GetEventsAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_items);
-    }
-}
-
-internal sealed class BlockingEventFeedProjection : IEventFeedProjection
-{
-    private readonly TaskCompletionSource _firstReplaceStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource _allowFirstReplaceToComplete = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private int _replaceAllCallCount;
-
-    public Task FirstReplaceStarted => _firstReplaceStarted.Task;
-
-    public int ReplaceAllCallCount => _replaceAllCallCount;
-
-    public void AllowFirstReplaceToComplete() => _allowFirstReplaceToComplete.TrySetResult();
-
-    public async Task ReplaceAllAsync(IReadOnlyCollection<EventFeedItem> events, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var callCount = Interlocked.Increment(ref _replaceAllCallCount);
-        if (callCount == 1)
-        {
-            _firstReplaceStarted.TrySetResult();
-            await _allowFirstReplaceToComplete.Task.WaitAsync(cancellationToken);
-        }
-    }
-}
-
-internal sealed class InMemoryOutboxMessageStore : IOutboxMessageStore
-{
-    private readonly Dictionary<Guid, OutboxMessage> _messages = [];
-
-    public bool SupportsPolling => true;
-
-    public IReadOnlyCollection<Guid> PublishedMessageIds => _messages.Values
-        .Where(message => message.NextAttemptAtUtc is null && !_pendingMessageIds.Contains(message.MessageId))
-        .Select(message => message.MessageId)
-        .ToArray();
-
-    public IReadOnlyCollection<Guid> DeferredMessageIds => _deferredMessageIds;
-
-    private readonly HashSet<Guid> _pendingMessageIds = [];
-    private readonly HashSet<Guid> _deferredMessageIds = [];
-
-    public Task EnqueueAsync(IIntegrationEvent integrationEvent, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var messageClrType = integrationEvent.GetType();
-        var payload = System.Text.Json.JsonSerializer.Serialize(integrationEvent, messageClrType, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
-        var message = new OutboxMessage(
-            integrationEvent.EventId,
-            messageClrType.FullName ?? messageClrType.Name,
-            payload,
-            null,
-            0,
-            integrationEvent.OccurredAtUtc,
-            null);
-
-        _messages[message.MessageId] = message;
-        _pendingMessageIds.Add(message.MessageId);
-        _deferredMessageIds.Remove(message.MessageId);
-        return Task.CompletedTask;
-    }
-
-    public Task<IReadOnlyCollection<OutboxMessage>> GetPendingAsync(IReadOnlyCollection<string> messageTypes, int maxCount, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var matches = _messages.Values
-            .Where(message => _pendingMessageIds.Contains(message.MessageId))
-            .Where(message => messageTypes.Contains(message.MessageType, StringComparer.Ordinal))
-            .OrderBy(message => message.CreatedAtUtc)
-            .Take(maxCount)
-            .ToArray();
-
-        return Task.FromResult<IReadOnlyCollection<OutboxMessage>>(matches);
-    }
-
-    public Task MarkPublishedAsync(Guid messageId, DateTimeOffset publishedAtUtc, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _pendingMessageIds.Remove(messageId);
-        _deferredMessageIds.Remove(messageId);
-        return Task.CompletedTask;
-    }
-
-    public Task DeferAsync(Guid messageId, DateTimeOffset nextAttemptAtUtc, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_messages.TryGetValue(messageId, out var message))
-        {
-            _messages[messageId] = message with
-            {
-                AttemptCount = message.AttemptCount + 1,
-                NextAttemptAtUtc = nextAttemptAtUtc
-            };
-        }
-
-        _deferredMessageIds.Add(messageId);
-        return Task.CompletedTask;
-    }
-}
-
-internal sealed class RecordingIntegrationEventPublisher : IIntegrationEventPublisher
-{
-    private readonly List<IIntegrationEvent> _publishedEvents = [];
-
-    public IReadOnlyCollection<IIntegrationEvent> PublishedEvents => _publishedEvents;
-
-    public Task PublishAsync<TIntegrationEvent>(TIntegrationEvent integrationEvent, CancellationToken cancellationToken)
-        where TIntegrationEvent : class, IIntegrationEvent
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _publishedEvents.Add(integrationEvent);
-        return Task.CompletedTask;
-    }
-}
-
-internal sealed class CountingBillProjectionRefreshOrchestrator : IBillProjectionRefreshOrchestrator
-{
-    public int InvocationCount { get; private set; }
-
-    public Task<BillProjectionRefreshExecutionResult> RefreshAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        InvocationCount++;
-        return Task.FromResult(new BillProjectionRefreshExecutionResult(true));
-    }
-}
-
-internal sealed class CountingProcessProjectionRefreshOrchestrator : IProcessProjectionRefreshOrchestrator
-{
-    public int InvocationCount { get; private set; }
-
-    public Task<ProcessProjectionRefreshExecutionResult> RefreshAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        InvocationCount++;
-        return Task.FromResult(new ProcessProjectionRefreshExecutionResult(true));
-    }
-}
-
-internal sealed class CountingActProjectionRefreshOrchestrator : IActProjectionRefreshOrchestrator
-{
-    public int InvocationCount { get; private set; }
-
-    public Task<ActProjectionRefreshExecutionResult> RefreshAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        InvocationCount++;
-        return Task.FromResult(new ActProjectionRefreshExecutionResult(true));
-    }
-}
-
-internal sealed class CountingMonitoringProfileProjectionRefreshOrchestrator : IMonitoringProfileProjectionRefreshOrchestrator
-{
-    public int InvocationCount { get; private set; }
-
-    public Task<MonitoringProfileProjectionRefreshExecutionResult> RefreshAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        InvocationCount++;
-        return Task.FromResult(new MonitoringProfileProjectionRefreshExecutionResult(true));
-    }
-}
-
-internal sealed class InMemoryInboxStore : IInboxStore
-{
-    private readonly HashSet<string> _processed = [];
-
-    public IReadOnlyCollection<string> ProcessedMessages => _processed;
-
-    public Task<bool> HasProcessedAsync(Guid messageId, string consumerName, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(_processed.Contains($"{consumerName}:{messageId:D}"));
-    }
-
-    public Task MarkProcessedAsync(Guid messageId, string consumerName, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _processed.Add($"{consumerName}:{messageId:D}");
-        return Task.CompletedTask;
-    }
-}
-
-internal sealed class StubMessagingDiagnosticsStore(MessagingDiagnosticsSnapshot snapshot) : IMessagingDiagnosticsStore
-{
-    public bool IsAvailable => snapshot.IsAvailable;
-
-    public Task<MessagingDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(snapshot);
-    }
-}
-
-internal sealed class StubBrokerDiagnosticsStore(BrokerDiagnosticsSnapshot snapshot) : IBrokerDiagnosticsStore
-{
-    public bool IsAvailable => snapshot.IsAvailable;
-
-    public Task<BrokerDiagnosticsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(snapshot);
-    }
-}
-
-internal sealed class StubRetentionMaintenanceStore(RetentionMaintenanceExecutionResult result) : IRetentionMaintenanceStore
-{
-    public bool IsAvailable => result.MaintenanceAvailable;
-
-    public Task<RetentionMaintenanceExecutionResult> RunAsync(
-        RetentionMaintenancePolicy policy,
-        DateTimeOffset executedAtUtc,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(result with { ExecutedAtUtc = executedAtUtc });
-    }
 }

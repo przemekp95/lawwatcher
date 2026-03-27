@@ -4,30 +4,33 @@ using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.BuildingBlocks.Health;
 using LawWatcher.BuildingBlocks.Messaging;
 using LawWatcher.BuildingBlocks.Ports;
-using LawWatcher.LegalCorpus.Application;
-using LawWatcher.LegalCorpus.Infrastructure;
 using MassTransit;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.IO;
 
-namespace LawWatcher.Worker.Ai;
+namespace LawWatcher.Worker.Documents;
 
-public static class WorkerAiHostApplication
+public static class WorkerDocumentsHostApplication
 {
     public static IHost Build(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
 
         var stateStorageOptions = builder.Configuration.GetSection("LawWatcher:Storage").Get<StateStorageOptions>() ?? new StateStorageOptions();
+        var objectStorageOptions = builder.Configuration.GetSection("Storage").Get<ObjectStorageOptions>() ?? new ObjectStorageOptions();
         var stateRoot = StateStoragePathResolver.ResolveRoot(stateStorageOptions, builder.Environment.ContentRootPath);
         var statePaths = LawWatcherStatePaths.ForRoot(stateRoot);
         var sqlServerStorageConnectionString = ResolveSqlServerStorageConnectionString(stateStorageOptions, builder.Configuration);
         var rabbitMqConnectionString = ResolveRabbitMqConnectionString(builder.Configuration);
         var readinessState = new HostReadinessState();
-        Directory.CreateDirectory(statePaths.AiTasksRoot);
-        Directory.CreateDirectory(statePaths.ActsRoot);
         Directory.CreateDirectory(statePaths.DocumentArtifactsRoot);
+
+        if (sqlServerStorageConnectionString is null)
+        {
+            throw new InvalidOperationException("Worker.Documents requires SQL-backed storage for inbox idempotency and document artifact metadata.");
+        }
+        var requiredSqlServerConnectionString = sqlServerStorageConnectionString;
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole();
@@ -40,15 +43,11 @@ public static class WorkerAiHostApplication
         builder.Services.Configure<StateStorageOptions>(builder.Configuration.GetSection("LawWatcher:Storage"));
         builder.Services.Configure<HostHealthOptions>(builder.Configuration.GetSection("LawWatcher:Health"));
         builder.Services.Configure<ObjectStorageOptions>(builder.Configuration.GetSection("Storage"));
-        builder.Services.Configure<LocalLlmWorkerOptions>(builder.Configuration.GetSection("LawWatcher:LocalLlmWorker"));
-        builder.Services.Configure<OllamaOptions>(builder.Configuration.GetSection("AI:Ollama"));
         builder.Services.AddSingleton(readinessState);
         builder.Services.AddSingleton<HostReadinessHealthCheck>();
-        builder.Services.AddSingleton<OllamaReadinessHealthCheck>();
         var healthChecks = builder.Services.AddHealthChecks();
-        healthChecks.AddCheck("self", () => HealthCheckResult.Healthy("Worker.Ai host is running."), tags: [LawWatcherHealthTags.Live]);
+        healthChecks.AddCheck("self", () => HealthCheckResult.Healthy("Worker.Documents host is running."), tags: [LawWatcherHealthTags.Live]);
         healthChecks.AddCheck<HostReadinessHealthCheck>("startup", tags: [LawWatcherHealthTags.Ready]);
-        healthChecks.AddCheck<OllamaReadinessHealthCheck>("ollama", tags: [LawWatcherHealthTags.Ready]);
         if (sqlServerStorageConnectionString is not null)
         {
             healthChecks.AddCheck("sqlserver", new SqlServerConnectionHealthCheck(sqlServerStorageConnectionString), tags: [LawWatcherHealthTags.Ready]);
@@ -59,77 +58,42 @@ public static class WorkerAiHostApplication
             healthChecks.AddCheck("rabbitmq", new RabbitMqConnectionHealthCheck(rabbitMqConnectionString), tags: [LawWatcherHealthTags.Ready]);
         }
 
-        if (rabbitMqConnectionString is not null)
+        if (rabbitMqConnectionString is null)
         {
-            builder.Services.AddMassTransit(services =>
+            throw new InvalidOperationException("Worker.Documents requires RabbitMQ broker transport.");
+        }
+
+        builder.Services.AddMassTransit(services =>
+        {
+            services.SetEndpointNameFormatter(new KebabCaseEndpointNameFormatter("worker-documents", false));
+            services.AddConsumer<ActArtifactAttachedConsumer>();
+            services.AddConsumer<BillDocumentAttachedConsumer>();
+            services.UsingRabbitMq((context, configuration) =>
             {
-                services.SetKebabCaseEndpointNameFormatter();
-                services.AddConsumer<AiEnrichmentRequestedConsumer>();
-                services.AddConsumer<DocumentTextExtractedAiRecoveryConsumer>();
-                services.UsingRabbitMq((context, configuration) =>
-                {
-                    ConfigureRabbitMqHost(configuration, rabbitMqConnectionString);
-                    ConfigureBrokerConsumerResiliency(configuration);
-                    configuration.ConfigureEndpoints(context);
-                });
+                ConfigureRabbitMqHost(configuration, rabbitMqConnectionString);
+                ConfigureBrokerConsumerResiliency(configuration);
+                configuration.ConfigureEndpoints(context);
             });
-            builder.Services.AddSingleton<AiEnrichmentRequestedMessageHandler>();
-            builder.Services.AddSingleton<DocumentTextRecoveryService>();
-            builder.Services.AddSingleton<DocumentTextRecoveryMessageHandler>();
-        }
-
-        if (sqlServerStorageConnectionString is not null)
-        {
-            builder.Services.AddSingleton<IEventStore>(_ => new SqlServerEventStore(sqlServerStorageConnectionString));
-            builder.Services.AddSingleton<IOutboxMessageStore>(_ => new SqlServerOutboxStore(sqlServerStorageConnectionString));
-            builder.Services.AddSingleton<IInboxStore>(_ => new SqlServerInboxStore(sqlServerStorageConnectionString));
-            builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new SqlServerDocumentArtifactCatalogStore(sqlServerStorageConnectionString));
-            builder.Services.AddSingleton<SqlServerAiEnrichmentTaskProjectionStore>(_ => new SqlServerAiEnrichmentTaskProjectionStore(sqlServerStorageConnectionString));
-            builder.Services.AddSingleton<IAiEnrichmentTaskProjection>(serviceProvider => serviceProvider.GetRequiredService<SqlServerAiEnrichmentTaskProjectionStore>());
-            builder.Services.AddSingleton<IAiEnrichmentTaskReadRepository>(serviceProvider => serviceProvider.GetRequiredService<SqlServerAiEnrichmentTaskProjectionStore>());
-            builder.Services.AddSingleton<IAiEnrichmentTaskRepository>(serviceProvider => new SqlServerAiEnrichmentTaskRepository(
-                serviceProvider.GetRequiredService<IEventStore>(),
-                sqlServerStorageConnectionString));
-        }
-        else
-        {
-            builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new FileBackedDocumentArtifactCatalogStore(statePaths.DocumentArtifactsRoot));
-            builder.Services.AddSingleton<IAiEnrichmentTaskProjection>(_ => new FileBackedAiEnrichmentTaskProjectionStore(statePaths.AiTasksRoot));
-            builder.Services.AddSingleton<IAiEnrichmentTaskReadRepository>(serviceProvider => serviceProvider.GetRequiredService<IAiEnrichmentTaskProjection>() as IAiEnrichmentTaskReadRepository
-                ?? throw new InvalidOperationException("AI enrichment projection store must implement the read repository."));
-            builder.Services.AddSingleton<IAiEnrichmentTaskRepository>(_ => new FileBackedAiEnrichmentTaskRepository(statePaths.AiTasksRoot));
-        }
-
-        if (sqlServerStorageConnectionString is not null)
-        {
-            builder.Services.AddSingleton<IPublishedActRepository>(serviceProvider => new SqlServerPublishedActRepository(
-                serviceProvider.GetRequiredService<IEventStore>(),
-                sqlServerStorageConnectionString));
-        }
-        else
-        {
-            builder.Services.AddSingleton<IPublishedActRepository>(_ => new FileBackedPublishedActRepository(statePaths.ActsRoot));
-        }
-
-        builder.Services.AddSingleton<ILlmService>(serviceProvider =>
-        {
-            var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<LocalLlmWorkerOptions>>().CurrentValue;
-            var ollamaOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OllamaOptions>>().CurrentValue;
-
-            return new OllamaLlmService(
-                new HttpClient
-                {
-                    BaseAddress = new Uri(ollamaOptions.BaseUrl, UriKind.Absolute),
-                    Timeout = TimeSpan.FromSeconds(Math.Max(5, ollamaOptions.RequestTimeoutSeconds))
-                },
-                options.DefaultModel,
-                $"{Math.Max(1, options.UnloadAfterIdleSeconds)}s");
         });
-        builder.Services.AddSingleton<IAiPromptAugmentor, PublishedActAiPromptAugmentor>();
-        builder.Services.AddSingleton<AiEnrichmentExecutionService>();
-        builder.Services.AddSingleton<AiEnrichmentQueueProcessor>();
+
+        builder.Services.AddSingleton<IInboxStore>(_ => new SqlServerInboxStore(requiredSqlServerConnectionString));
+        builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new SqlServerDocumentArtifactCatalogStore(requiredSqlServerConnectionString));
+
+        builder.Services.AddSingleton<IDocumentStore>(_ =>
+        {
+            return DocumentStoreRuntimeResolver.Select(objectStorageOptions) switch
+            {
+                DocumentStoreBackend.S3Compatible => new S3CompatibleDocumentStore(objectStorageOptions.Minio),
+                _ => new LocalFileDocumentStore(DocumentStoreRuntimeResolver.ResolveLocalDocumentsRoot(
+                    objectStorageOptions,
+                    builder.Environment.ContentRootPath))
+            };
+        });
+        builder.Services.AddSingleton<IOcrService, ContainerizedDocumentOcrService>();
+        builder.Services.AddSingleton<IIntegrationEventPublisher, MassTransitIntegrationEventPublisher>();
+        builder.Services.AddSingleton<DocumentProcessingService>();
+        builder.Services.AddSingleton<DocumentProcessingMessageHandler>();
         builder.Services.AddHostedService<WorkerHealthServerHostedService>();
-        builder.Services.AddHostedService<Worker>();
 
         var host = builder.Build();
         host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(readinessState.MarkReady);
@@ -206,5 +170,15 @@ public static class WorkerAiHostApplication
                 BrokerConsumerResiliency.ImmediateRetryCount,
                 BrokerConsumerResiliency.ImmediateRetryInterval);
         });
+    }
+
+    private sealed class MassTransitIntegrationEventPublisher(IBus bus) : IIntegrationEventPublisher
+    {
+        public Task PublishAsync<TIntegrationEvent>(TIntegrationEvent integrationEvent, CancellationToken cancellationToken)
+            where TIntegrationEvent : class, IIntegrationEvent
+        {
+            ArgumentNullException.ThrowIfNull(integrationEvent);
+            return bus.Publish(integrationEvent, cancellationToken);
+        }
     }
 }

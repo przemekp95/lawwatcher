@@ -30,3 +30,11 @@ services:
       args:
         PROJECT_PATH: src/Workers/LawWatcher.Worker.Ai/LawWatcher.Worker.Ai.csproj
         APP_DLL: LawWatcher.Worker.Ai.dll
+
+  worker-documents:
+    build:
+      context: ../..
+      dockerfile: ops/compose/Dockerfile.host
+      args:
+        PROJECT_PATH: src/Workers/LawWatcher.Worker.Documents/LawWatcher.Worker.Documents.csproj
+        APP_DLL: LawWatcher.Worker.Documents.dll

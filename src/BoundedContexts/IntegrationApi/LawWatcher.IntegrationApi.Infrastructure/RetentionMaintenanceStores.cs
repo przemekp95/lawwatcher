@@ -1,3 +1,5 @@
+using LawWatcher.AiEnrichment.Application;
+using LawWatcher.BuildingBlocks.Ports;
 using LawWatcher.IntegrationApi.Application;
 using Microsoft.Data.SqlClient;
 using System.Text.RegularExpressions;
@@ -8,7 +10,7 @@ public sealed class DisabledRetentionMaintenanceStore : IRetentionMaintenanceSto
 {
     private const string SearchDocumentsRetentionReason = "search_documents retention is unavailable outside the SQL-backed maintenance runtime.";
     private const string AiTasksRetentionReason = "ai_enrichment_tasks retention is unavailable outside the SQL-backed maintenance runtime.";
-    private const string DocumentArtifactsRetentionReason = "Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.";
+    private const string DocumentArtifactsRetentionReason = "document_artifacts retention is unavailable outside the SQL-backed maintenance runtime.";
 
     public bool IsAvailable => false;
 
@@ -45,6 +47,8 @@ public sealed class DisabledRetentionMaintenanceStore : IRetentionMaintenanceSto
 
 public sealed class SqlServerRetentionMaintenanceStore(
     string connectionString,
+    IDocumentStore documentStore,
+    IDocumentArtifactCatalog documentArtifactCatalog,
     string schema = "lawwatcher") : IRetentionMaintenanceStore
 {
     private const string SearchDocumentsRetentionSkippedReason = "search_documents retention was not requested.";
@@ -52,11 +56,13 @@ public sealed class SqlServerRetentionMaintenanceStore(
     private const string AiTasksRetentionSkippedReason = "ai_enrichment_tasks retention was not requested.";
     private const string AiTasksRetentionAppliedReason = "completed and failed ai_enrichment_tasks older than the requested retention window were pruned by terminal timestamps.";
     private const string DocumentArtifactsRetentionSkippedReason = "Document artifact retention was not requested.";
-    private const string DocumentArtifactsRetentionUnavailableReason = "Document artifact retention is not available because the current runtime does not track safe artifact ownership or expiry metadata.";
+    private const string DocumentArtifactsRetentionAppliedReason = "derived OCR and AI document artifacts older than the requested retention window were pruned by created_at_utc.";
 
     private readonly string _connectionString = string.IsNullOrWhiteSpace(connectionString)
         ? throw new ArgumentException("Connection string cannot be empty.", nameof(connectionString))
         : connectionString;
+    private readonly IDocumentStore _documentStore = documentStore ?? throw new ArgumentNullException(nameof(documentStore));
+    private readonly IDocumentArtifactCatalog _documentArtifactCatalog = documentArtifactCatalog ?? throw new ArgumentNullException(nameof(documentArtifactCatalog));
     private readonly string _schema = ValidateSchema(schema);
 
     public bool IsAvailable => true;
@@ -97,6 +103,12 @@ public sealed class SqlServerRetentionMaintenanceStore(
 
         await transaction.CommitAsync(cancellationToken);
 
+        var deletedDocumentArtifactsCount = 0;
+        if (documentArtifactsCutoffUtc is not null)
+        {
+            deletedDocumentArtifactsCount = await DeleteDocumentArtifactsAsync(documentArtifactsCutoffUtc.Value, cancellationToken);
+        }
+
         return new RetentionMaintenanceExecutionResult(
             true,
             executedAtUtc,
@@ -119,10 +131,10 @@ public sealed class SqlServerRetentionMaintenanceStore(
                 ? AiTasksRetentionAppliedReason
                 : AiTasksRetentionSkippedReason,
             documentArtifactsCutoffUtc,
-            0,
-            false,
+            deletedDocumentArtifactsCount,
+            documentArtifactsCutoffUtc is not null,
             documentArtifactsCutoffUtc is not null
-                ? DocumentArtifactsRetentionUnavailableReason
+                ? DocumentArtifactsRetentionAppliedReason
                 : DocumentArtifactsRetentionSkippedReason);
     }
 
@@ -208,6 +220,35 @@ public sealed class SqlServerRetentionMaintenanceStore(
         await using var command = new SqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("@cutoffUtc", cutoffUtc.UtcDateTime);
         return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<int> DeleteDocumentArtifactsAsync(
+        DateTimeOffset cutoffUtc,
+        CancellationToken cancellationToken)
+    {
+        var artifacts = (await _documentArtifactCatalog.ListAsync(cancellationToken))
+            .Where(entry => entry.CreatedAtUtc < cutoffUtc)
+            .ToArray();
+        if (artifacts.Length == 0)
+        {
+            return 0;
+        }
+
+        foreach (var artifact in artifacts)
+        {
+            await _documentStore.DeleteAsync(
+                new StoredDocumentReference(
+                    artifact.DerivedBucket,
+                    artifact.DerivedObjectKey,
+                    artifact.DerivedContentType),
+                cancellationToken);
+        }
+
+        return await _documentArtifactCatalog.DeleteAsync(
+            artifacts
+                .Select(entry => entry.ArtifactId)
+                .ToArray(),
+            cancellationToken);
     }
 
     private static string ValidateSchema(string schema)

@@ -46,6 +46,7 @@ minio_api_port="$(get_free_port)"
 minio_console_port="$(get_free_port)"
 worker_lite_health_port="$(get_free_port)"
 worker_ai_health_port="$(get_free_port)"
+worker_documents_health_port="$(get_free_port)"
 ollama_host_port="$(get_free_port)"
 
 write_env_file_from_example \
@@ -60,10 +61,12 @@ write_env_file_from_example \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
+  "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "WORKERS__LITE__MAXCONCURRENCY=1" \
   "WORKERS__AI__MAXCONCURRENCY=1" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
 
 compose_args=(
   compose
@@ -92,7 +95,11 @@ fi
 
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
+wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+echo "Waiting for seeded act OCR artifacts..." >&2
+wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
 docker "${compose_args[@]}" stop worker-ai >/dev/null
 

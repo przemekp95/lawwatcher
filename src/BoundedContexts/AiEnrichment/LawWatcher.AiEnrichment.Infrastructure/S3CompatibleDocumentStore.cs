@@ -59,6 +59,28 @@ public sealed class S3CompatibleDocumentStore(S3CompatibleDocumentStoreOptions o
         return content;
     }
 
+    public async Task DeleteAsync(StoredDocumentReference reference, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var bucket = NormalizeSegment(reference.Bucket, nameof(reference.Bucket), "Bucket");
+        var objectKey = NormalizeObjectKey(reference.ObjectKey);
+
+        try
+        {
+            await _client.RemoveObjectAsync(
+                new RemoveObjectArgs()
+                    .WithBucket(bucket)
+                    .WithObject(objectKey),
+                cancellationToken);
+        }
+        catch (Minio.Exceptions.ObjectNotFoundException)
+        {
+            // Retention treats already-missing derived artifacts as successfully removed.
+        }
+    }
+
     private async Task EnsureBucketExistsAsync(string bucket, CancellationToken cancellationToken)
     {
         var bucketExists = await _client.BucketExistsAsync(
@@ -67,10 +89,24 @@ public sealed class S3CompatibleDocumentStore(S3CompatibleDocumentStoreOptions o
 
         if (!bucketExists)
         {
-            await _client.MakeBucketAsync(
-                new MakeBucketArgs()
-                    .WithBucket(bucket),
-                cancellationToken);
+            try
+            {
+                await _client.MakeBucketAsync(
+                    new MakeBucketArgs()
+                        .WithBucket(bucket),
+                    cancellationToken);
+            }
+            catch (ArgumentException)
+            {
+                if (!await _client.BucketExistsAsync(
+                    new BucketExistsArgs().WithBucket(bucket),
+                    cancellationToken))
+                {
+                    throw;
+                }
+
+                // Another worker created the bucket between the existence check and create call.
+            }
         }
     }
 

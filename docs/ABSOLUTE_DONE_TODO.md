@@ -44,7 +44,7 @@ Mozna uczciwie powiedziec:
 Nie mozna jeszcze uczciwie powiedziec:
 
 - ze compose/images/deploy sa finalnie domkniete
-- ze object/document pipeline ma juz dowiezione finalne adaptery i runtime proof dla przyjetego kierunku: `MinIO` jako default, realny OCR i produkcyjny semantic search
+- ze image-first CI/GHCR ma juz finalnie swiezy green dla wszystkich deklarowanych proof lanes i wspieranego `docker compose pull && up`
 
 ## Locked Product Decisions
 
@@ -53,7 +53,7 @@ Te kierunki nie sa juz otwarte i nie powinny wracac jako pytania backlogowe:
 - `ProjectionIndex` zostaje finalnym laptop-first search backendem; `SqlFullText` pozostaje opt-in adapterem poza obecna support matrix, dopoki nie dostanie dedykowanego proofu runtime.
 - `OpenSearch/HybridVector` jest wymagane do uznania `full-host` za done, a semantic search jest funkcja produkcyjna, nie tylko architektonicznym przygotowaniem.
 - `MinIO` jest finalnym, docelowym defaultem dla document/artifact storage w wspieranym runtime.
-- finalnym kierunkiem dla OCR jest realny OCR; obecny `PlainTextOcrService` jest tylko adapterem przejsciowym, dopoki nie zostanie podmieniony na docelowa implementacje.
+- finalnym kierunkiem dla OCR jest realny OCR i jest on juz realizowany przez dedykowany `worker-documents`; `PlainTextOcrService` nie jest juz wspieranym runtime adapterem.
 - finalny operational write surface to obecny admin CRUD plus ingest-driven core flow; seed data, demo tokeny i smoke harnessy nie sa wspieranym write path.
 - gdy `RabbitMQ` jest skonfigurowane, broker jest normalna sciezka runtime; SQL poller zostaje fallbackiem/recovery, a nie rownorzednym primary transportem.
 
@@ -95,6 +95,8 @@ Pozostalo:
   Status:
   wspierane profile Docker `dev-laptop`, `dev-laptop --include-ai`, `full-host` i `full-host --include-opensearch` maja juz swiezy green na prawdziwym `RabbitMQ` w kontenerach.
 - [ ] Domknac retry, defer, poison handling i DLQ.
+  Status:
+  application-level recovery po `DocumentTextExtractedIntegrationEvent` jest juz dowieziony w `worker-ai`, `full-host` uruchamia juz `worker-ai` jako wspierany host, a poison smoke obejmuje juz `ai-enrichment-requested`, `act-artifact-attached` i `document-text-extracted-ai-recovery`; nadal brakuje tylko swiezego zielonego wykonania Docker proof jako finalnego dowodu runtime.
 - [x] Zamknac stance runtime: SQL poller jako jawny fallback/recovery, a nie rownorzedna normalna sciezka.
   Status:
   finalna decyzja jest zamknieta: w profilach z `RabbitMQ` broker jest normalna sciezka runtime, a SQL poller zostaje tylko jako fallback/recovery i bounded catch-up, nie jako rownorzedny primary transport.
@@ -171,11 +173,11 @@ Pozostalo:
 - [x] Zamknac decyzje o roli `PlainTextOcrService` i `DeterministicEmbeddingService`.
   Status:
   finalna decyzja jest zamknieta: produkt ma dowiezc realny OCR; obecny `PlainTextOcrService` jest adapterem przejsciowym i nie jest finalnym OCR. `DeterministicEmbeddingService` pozostaje test-only, a produkcyjny embedding path zostaje zwiazany z `OpenSearch + Ollama`.
-- [ ] Podmienic `PlainTextOcrService` na docelowy adapter real OCR i ustawic truthful capability/reporting na podstawie realnej gotowosci runtime.
-- [ ] Domknac finalny OCR-to-artifact/index flow dla source documents, tak zeby AI grounding i semantic search nie opieraly sie na placeholderze plain-text extraction.
-- [ ] Domknac retention/cleanup dla artefaktow dokumentowych i wynikow AI.
+- [x] Podmienic `PlainTextOcrService` na docelowy adapter real OCR i ustawic truthful capability/reporting na podstawie realnej gotowosci runtime.
+- [x] Domknac finalny OCR-to-artifact/index flow dla source documents, tak zeby AI grounding i semantic search nie opieraly sie na placeholderze plain-text extraction.
+- [x] Domknac retention/cleanup dla artefaktow dokumentowych i wynikow AI.
   Status:
-  `POST /v1/system/maintenance/retention` obejmuje juz opt-in cleanup terminalnych `ai_enrichment_tasks` przez `aiTasksRetentionHours`, ale `documentArtifactsRetentionHours` pozostaje truthful `unsupported`, dopoki runtime nie ma bezpiecznej metadanej ownership/expiry dla destrukcyjnego cleanupu source artifacts.
+  `worker-documents` jest juz realnym hostem dokumentow/OCR, `ContainerizedDocumentOcrService` zastapil placeholderowy `PlainTextOcrService` na wspieranym runtime path, `worker-ai` czyta gotowe derived text artifacts z katalogu artefaktow zamiast wykonywac OCR on demand, `worker-projection` odswieza search po `DocumentTextExtractedIntegrationEvent`, a `POST /v1/system/maintenance/retention` usuwa juz tylko derived OCR/AI artifacts przez `documentArtifactsRetentionHours` bez naruszania authoritative source documents.
 
 Exit criteria:
 
@@ -238,7 +240,7 @@ Exit criteria:
 Status juz zrobione:
 
 - API, `worker-lite`, `worker-ai` i `worker-documents` maja health/readiness endpoints
-- istnieje swiezy host health smoke dla `API + Worker.Lite + Worker.Ai`
+- istnieje swiezy host health smoke dla `API + Worker.Lite + Worker.Ai + Worker.Documents`
 
 Pozostalo:
 
@@ -309,4 +311,4 @@ Exit criteria:
 
 Dzis mozna uczciwie powiedziec:
 
-"LawWatcher ma mocny laptop-first foundation, duza czesc runtime SQL-backed, operator-secured admin CRUD w API i portalu, project-managed lokalny LLM oraz swiezo zielone Docker i RabbitMQ runtime dla `dev-laptop`, `full-host` i wymaganego `full-host + opensearch` dla semantic search. Kierunek produktu jest juz zamkniety: `ProjectionIndex` zostaje laptop-first baseline, `OpenSearch/HybridVector` jest wymagane dla `full-host`, `MinIO` jest finalnym object store defaultem, a OCR ma byc realnym OCR. Nie jest jeszcze finalnie domkniety jako caly produkt. Najwieksze otwarte tematy to finalne packaging/deploy dla wszystkich deklarowanych hostow, podmiana placeholderowego OCR na docelowy runtime i pozostaly ops hardening."
+"LawWatcher ma mocny laptop-first foundation, duza czesc runtime SQL-backed, operator-secured admin CRUD w API i portalu, project-managed lokalny LLM oraz swiezo zielone Docker i RabbitMQ runtime dla `dev-laptop`, `full-host` i wymaganego `full-host + opensearch` dla semantic search. Kierunek produktu jest juz zamkniety i odzwierciedlony w runtime: `ProjectionIndex` zostaje laptop-first baseline, `OpenSearch/HybridVector` jest wymagane dla `full-host`, `MinIO` jest finalnym object store defaultem, a OCR idzie przez dedykowany `worker-documents` z derived text artifacts. Nie jest jeszcze finalnie domkniety jako caly produkt. Najwieksze otwarte tematy to finalne packaging/deploy z fresh GHCR proofami i pozostaly ops hardening na poziomie swiezych image-first wykonanych lane'ow."

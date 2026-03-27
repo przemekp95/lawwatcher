@@ -12,6 +12,7 @@ public sealed class StateStorageOptions
 public sealed record LawWatcherStatePaths(
     string Root,
     string AiTasksRoot,
+    string DocumentArtifactsRoot,
     string ReplaysRoot,
     string BackfillsRoot,
     string ProfileSubscriptionsRoot,
@@ -36,6 +37,7 @@ public sealed record LawWatcherStatePaths(
         return new LawWatcherStatePaths(
             normalizedRoot,
             Path.Combine(normalizedRoot, "ai-enrichment", "tasks"),
+            Path.Combine(normalizedRoot, "ai-enrichment", "document-artifacts"),
             Path.Combine(normalizedRoot, "integration-api", "replays"),
             Path.Combine(normalizedRoot, "integration-api", "backfills"),
             Path.Combine(normalizedRoot, "taxonomy-and-profiles", "subscriptions"),

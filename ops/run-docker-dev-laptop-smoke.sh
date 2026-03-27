@@ -39,14 +39,24 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 env_file="${tmp_dir}/dev-laptop.env"
+project_name="lawwatcher-dev-laptop-$(random_suffix)"
+worker_documents_health_port="$(get_free_port)"
+ocr_capability="false"
+
+if [[ "$include_ai" == "true" ]]; then
+  ocr_capability="true"
+fi
 
 write_env_file_from_example \
   "ops/env/dev-laptop.env.example" \
   "${env_file}" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
+  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=${ocr_capability}"
 
 compose_args=(
   compose
+  -p "${project_name}"
   -f ops/compose/docker-compose.yml
   --env-file "${env_file}"
 )
@@ -77,13 +87,26 @@ portal_root="$(wait_http_ok "http://127.0.0.1:8081/")"
 portal_admin="$(wait_http_ok "http://127.0.0.1:8081/admin")"
 acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/acts")"
 search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=VAT")"
+capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
 
 completed_ai_task_json='null'
 verified_ai_model='null'
+ocr_search_json='null'
 
 if [[ "$include_ai" == "true" ]]; then
   ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
   verified_ai_model="$(node -e "process.stdout.write(JSON.stringify(process.argv[1]));" "$ai_model")"
+  wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
+  wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
+
+  ocr_enabled="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(Boolean(data.ocrEnabled)));")"
+  if [[ "$ocr_enabled" != "true" ]]; then
+    echo "Expected OCR capability to be enabled in AI smoke lane." >&2
+    exit 1
+  fi
+
+  echo "Waiting for seeded act OCR artifacts..." >&2
+  wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
   act_id="$(printf '%s' "$acts_json" | json_eval "process.stdout.write(String(data[0].id));")"
   act_title="$(printf '%s' "$acts_json" | json_eval "process.stdout.write(JSON.stringify(data[0].title));")"
@@ -101,6 +124,13 @@ if [[ "$include_ai" == "true" ]]; then
     echo "Expected dockerized AI task to include ELI and document://legal-corpus citations." >&2
     exit 1
   fi
+
+  ocr_search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=1%20kwietnia%202026")"
+  ocr_search_has_act_hit="$(printf '%s' "$ocr_search_json" | json_eval "process.stdout.write(String((data.hits || []).some(hit => String(hit.type || '') === 'act')));")"
+  if [[ "$ocr_search_has_act_hit" != "true" ]]; then
+    echo "Expected dockerized OCR/document flow to refresh the search projection with an act hit for the grounded act source text." >&2
+    exit 1
+  fi
 fi
 
 services_json="$(docker_compose_json_array "${compose_args[@]}")"
@@ -114,7 +144,9 @@ PORTAL_ROOT="$portal_root" \
 PORTAL_ADMIN="$portal_admin" \
 ACTS_JSON="$acts_json" \
 SEARCH_JSON="$search_json" \
+CAPABILITIES_JSON="$capabilities_json" \
 SERVICES_JSON="$services_json" \
 COMPLETED_AI_TASK_JSON="$completed_ai_task_json" \
+OCR_SEARCH_JSON="$ocr_search_json" \
 VERIFIED_AI_MODEL="$verified_ai_model" \
-node -e "const acts=JSON.parse(process.env.ACTS_JSON); const search=JSON.parse(process.env.SEARCH_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const includeAi=process.env.INCLUDE_AI.toLowerCase()==='true'; const task=process.env.COMPLETED_AI_TASK_JSON==='null'?null:JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const verifiedModel=process.env.VERIFIED_AI_MODEL==='null'?null:JSON.parse(process.env.VERIFIED_AI_MODEL); const summary={verifiedAtUtc:new Date().toISOString(), includeAi, apiHealthStatusCode:200, portalRootStatusCode:200, portalAdminStatusCode:200, actsCount:acts.length, searchHitCount:(search.hits||[]).length, verifiedAiModel:verifiedModel, completedAiTaskId:task?task.id:null, completedAiTaskStatus:task?task.status:null, services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "$summary_path"
+node -e "const acts=JSON.parse(process.env.ACTS_JSON); const search=JSON.parse(process.env.SEARCH_JSON); const capabilities=JSON.parse(process.env.CAPABILITIES_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const includeAi=process.env.INCLUDE_AI.toLowerCase()==='true'; const task=process.env.COMPLETED_AI_TASK_JSON==='null'?null:JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const ocrSearch=process.env.OCR_SEARCH_JSON==='null'?null:JSON.parse(process.env.OCR_SEARCH_JSON); const verifiedModel=process.env.VERIFIED_AI_MODEL==='null'?null:JSON.parse(process.env.VERIFIED_AI_MODEL); const summary={verifiedAtUtc:new Date().toISOString(), includeAi, apiHealthStatusCode:200, portalRootStatusCode:200, portalAdminStatusCode:200, actsCount:acts.length, searchHitCount:(search.hits||[]).length, ocrSearchHitCount:ocrSearch?(ocrSearch.hits||[]).length:null, ocrEnabled:Boolean(capabilities.ocrEnabled), verifiedAiModel:verifiedModel, completedAiTaskId:task?task.id:null, completedAiTaskStatus:task?task.status:null, services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "$summary_path"

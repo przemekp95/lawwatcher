@@ -5,6 +5,8 @@ namespace LawWatcher.Api.Runtime;
 
 public sealed record AiInfrastructureCapabilities(bool SupportsConfiguredLocalLlm);
 
+public sealed record OcrInfrastructureCapabilities(bool SupportsConfiguredDocumentPipeline);
+
 public interface ISystemCapabilitiesProvider
 {
     SystemCapabilities Current { get; }
@@ -13,7 +15,8 @@ public interface ISystemCapabilitiesProvider
 public sealed class ConfigurationSystemCapabilitiesProvider(
     IOptionsMonitor<LawWatcherRuntimeOptions> optionsMonitor,
     SearchInfrastructureCapabilities searchInfrastructureCapabilities,
-    AiInfrastructureCapabilities aiInfrastructureCapabilities)
+    AiInfrastructureCapabilities aiInfrastructureCapabilities,
+    OcrInfrastructureCapabilities ocrInfrastructureCapabilities)
     : ISystemCapabilitiesProvider
 {
     public SystemCapabilities Current
@@ -39,7 +42,8 @@ public sealed class ConfigurationSystemCapabilitiesProvider(
             return configuredCapabilities with
             {
                 Ai = effectiveAiCapabilities,
-                Search = effectiveSearchCapabilities
+                Search = effectiveSearchCapabilities,
+                OcrEnabled = configuredCapabilities.OcrEnabled && ocrInfrastructureCapabilities.SupportsConfiguredDocumentPipeline
             };
         }
     }

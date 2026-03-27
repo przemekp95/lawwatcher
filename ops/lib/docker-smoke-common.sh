@@ -22,18 +22,103 @@ json_eval() {
 wait_http_ok() {
   local url="$1"
   local attempts="${2:-120}"
+  local label="${3:-}"
   local body
+  local status
+  local body_file
+  local last_status=""
+  local last_body=""
+
+  body_file="$(mktemp)"
 
   for ((attempt=0; attempt<attempts; attempt++)); do
-    body="$(curl -fsS --max-time 5 "$url" 2>/dev/null || true)"
-    if [[ -n "$body" ]]; then
+    : >"${body_file}"
+    status="$(curl -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
+    body="$(cat "${body_file}" 2>/dev/null || true)"
+
+    if [[ "${status}" =~ ^2[0-9][0-9]$ && -n "$body" ]]; then
+      rm -f "${body_file}"
       printf '%s' "$body"
       return 0
     fi
+
+    if [[ -n "${status}" && "${status}" != "000" ]]; then
+      last_status="${status}"
+      last_body="${body}"
+    fi
+
     sleep 2
   done
 
-  echo "HTTP endpoint did not become ready in time: $url" >&2
+  if [[ -n "${label}" ]]; then
+    echo "HTTP endpoint did not become ready in time: ${label} (${url})" >&2
+  else
+    echo "HTTP endpoint did not become ready in time: $url" >&2
+  fi
+
+  if [[ -n "${last_status}" ]]; then
+    echo "Last HTTP status: ${last_status}" >&2
+  fi
+
+  if [[ -n "${last_body}" ]]; then
+    echo "Last HTTP body:" >&2
+    printf '%s\n' "${last_body}" >&2
+  fi
+
+  rm -f "${body_file}"
+  exit 1
+}
+
+wait_http_body_contains() {
+  local url="$1"
+  local expected_text="$2"
+  local attempts="${3:-60}"
+  local label="${4:-}"
+  local body
+  local status
+  local body_file
+  local last_status=""
+  local last_body=""
+
+  body_file="$(mktemp)"
+
+  for ((attempt=0; attempt<attempts; attempt++)); do
+    : >"${body_file}"
+    status="$(curl -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
+    body="$(cat "${body_file}" 2>/dev/null || true)"
+
+    if [[ "${status}" =~ ^2[0-9][0-9]$ && "${body}" == *"${expected_text}"* ]]; then
+      rm -f "${body_file}"
+      printf '%s' "${body}"
+      return 0
+    fi
+
+    if [[ -n "${status}" && "${status}" != "000" ]]; then
+      last_status="${status}"
+      last_body="${body}"
+    fi
+
+    sleep 2
+  done
+
+  if [[ -n "${label}" ]]; then
+    echo "HTTP endpoint did not expose expected live identity in time: ${label} (${url})" >&2
+  else
+    echo "HTTP endpoint did not expose expected live identity in time: $url" >&2
+  fi
+
+  echo "Expected body fragment: ${expected_text}" >&2
+
+  if [[ -n "${last_status}" ]]; then
+    echo "Last HTTP status: ${last_status}" >&2
+  fi
+
+  if [[ -n "${last_body}" ]]; then
+    echo "Last HTTP body:" >&2
+    printf '%s\n' "${last_body}" >&2
+  fi
+
+  rm -f "${body_file}"
   exit 1
 }
 
@@ -173,6 +258,31 @@ wait_compose_logs_match() {
   exit 1
 }
 
+wait_default_seed_act_ocr_ready() {
+  local attempts="${1:-90}"
+  shift
+  local compose_args=("$@")
+  local sql_sa_password="${SQLSERVER_SA_PASSWORD:-ChangeMe!123456}"
+  local sql_database="${SQLSERVER_DATABASE:-LawWatcher}"
+  local artifact_count=""
+  local query="SET NOCOUNT ON; SELECT COUNT(*) FROM [lawwatcher].[document_artifacts] WHERE [owner_type] = N'act' AND [source_object_key] IN (N'acts/DU/2026/501/text.txt', N'acts/DU/2026/502/text.txt');"
+
+  for ((attempt=0; attempt<attempts; attempt++)); do
+    artifact_count="$(MSYS2_ARG_CONV_EXCL='/opt/mssql-tools18/bin/sqlcmd' docker "${compose_args[@]}" exec -T sqlserver /opt/mssql-tools18/bin/sqlcmd -C -S localhost -d "${sql_database}" -U sa -P "${sql_sa_password}" -h -1 -W -Q "${query}" 2>/dev/null | tr -d '\r' | tail -n 1 | xargs || true)"
+    if [[ "${artifact_count}" =~ ^[0-9]+$ ]] && [[ "${artifact_count}" -ge 2 ]]; then
+      return 0
+    fi
+
+    sleep 2
+  done
+
+  echo "Default seeded act OCR artifacts did not reach the SQL document catalog in time." >&2
+  if [[ -n "${artifact_count}" ]]; then
+    echo "Last observed act artifact count: ${artifact_count}" >&2
+  fi
+  exit 1
+}
+
 resolve_compose_published_port() {
   local service_name="$1"
   local container_port="$2"
@@ -180,9 +290,13 @@ resolve_compose_published_port() {
   local compose_args=("$@")
   local mapping=""
   local published_port=""
+  local normalized_container_port="${container_port%%/*}"
 
   for ((attempt=0; attempt<30; attempt++)); do
-    mapping="$(docker "${compose_args[@]}" port "${service_name}" "${container_port}" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+    mapping="$(docker "${compose_args[@]}" port "${service_name}" "${normalized_container_port}" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+    if [[ -z "${mapping}" && "${normalized_container_port}" != "${container_port}" ]]; then
+      mapping="$(docker "${compose_args[@]}" port "${service_name}" "${container_port}" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+    fi
     if [[ -n "${mapping}" ]]; then
       published_port="${mapping##*:}"
       if [[ "${published_port}" =~ ^[0-9]+$ ]]; then

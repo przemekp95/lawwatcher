@@ -64,6 +64,7 @@ services:
       STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
       LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-false}
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
       Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
       AI__MODE: ${AI__MODE}
@@ -157,6 +158,7 @@ services:
       STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
       STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-false}
       AI__MODE: ${AI__MODE}
       AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
       AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
@@ -171,6 +173,32 @@ services:
       minio:
         condition: service_started
       ollama:
+        condition: service_started
+
+  worker-documents:
+    image: ${LAWWATCHER_WORKER_DOCUMENTS_IMAGE}
+    profiles:
+      - ai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      LawWatcher__Storage__Provider: sqlserver
+      LawWatcher__Health__Urls: http://+:8080
+      ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
+      ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
+      STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
+      STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
+      STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-false}
+    ports:
+      - "${WORKER_DOCUMENTS_HEALTH_PORT:-5396}:8080"
+    depends_on:
+      sql-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      minio:
         condition: service_started
 
 volumes:

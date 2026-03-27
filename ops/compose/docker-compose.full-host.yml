@@ -3,6 +3,7 @@ services:
     environment:
       LawWatcher__Runtime__Profile: full-host
       LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-true}
       LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}
       LawWatcher__Runtime__Capabilities__HybridSearch: ${ENABLE_OPENSEARCH}
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
@@ -37,6 +38,7 @@ services:
   worker-documents:
     image: ${LAWWATCHER_WORKER_DOCUMENTS_IMAGE}
     profiles:
+      - ai
       - full-host
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
@@ -47,11 +49,8 @@ services:
       STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
       STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
-      AI__MODE: ${AI__MODE}
-      AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
-      AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-true}
       LawWatcher__Health__Urls: http://+:8080
-      LawWatcher__LocalLlmWorker__MaxConcurrency: ${WORKERS__DOCUMENTS__MAXCONCURRENCY}
     ports:
       - "${WORKER_DOCUMENTS_HEALTH_PORT:-5396}:8080"
     depends_on:
@@ -61,8 +60,14 @@ services:
         condition: service_started
       minio:
         condition: service_started
-      ollama:
-        condition: service_started
+
+  worker-ai:
+    profiles:
+      - ai
+      - full-host
+    environment:
+      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-true}
 
   worker-projection:
     image: ${LAWWATCHER_WORKER_PROJECTION_IMAGE}

@@ -143,3 +143,6 @@ jobs:
 
       - name: Structured-log proof
         run: bash ops/run-structured-log-proof.sh
+
+      - name: Poison DLQ recovery smoke
+        run: bash ops/run-poison-dlq-recovery-smoke.sh

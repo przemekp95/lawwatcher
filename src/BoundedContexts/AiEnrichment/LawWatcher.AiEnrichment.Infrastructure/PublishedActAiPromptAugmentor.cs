@@ -9,7 +9,7 @@ namespace LawWatcher.AiEnrichment.Infrastructure;
 
 public sealed class PublishedActAiPromptAugmentor(
     IPublishedActRepository actRepository,
-    IOcrService ocrService) : IAiPromptAugmentor
+    IDocumentArtifactCatalog artifactCatalog) : IAiPromptAugmentor
 {
     private const int MaxExtractedCharacters = 1600;
 
@@ -41,39 +41,34 @@ public sealed class PublishedActAiPromptAugmentor(
             return new AiPromptAugmentation(prompt, [act.Eli.Value]);
         }
 
-        try
+        var extractedArtifact = await artifactCatalog.GetBySourceAsync(
+            LegalCorpusArtifactStorage.Bucket,
+            artifact.ObjectKey,
+            cancellationToken);
+        if (extractedArtifact is null)
         {
-            var document = LegalCorpusArtifactStorage.CreateDocumentReference(artifact.ObjectKey);
-            var ocrResult = await ocrService.ExtractAsync(document, cancellationToken);
-            var excerpt = NormalizeExtractedText(ocrResult.ExtractedText);
-
-            if (excerpt.Length == 0)
-            {
-                return new AiPromptAugmentation(prompt, [act.Eli.Value, LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey)]);
-            }
-
-            var groundedPrompt = new StringBuilder(prompt.Length + excerpt.Length + 256)
-                .AppendLine(prompt)
-                .AppendLine()
-                .AppendLine("Material z dokumentu zrodlowego:")
-                .Append("- ELI: ").AppendLine(act.Eli.Value)
-                .Append("- Artefakt: ").AppendLine(LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey))
-                .AppendLine("Wyciag tekstu ze zrodla:")
-                .Append(excerpt)
-                .ToString();
-
-            return new AiPromptAugmentation(
-                groundedPrompt,
-                [act.Eli.Value, LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey)]);
+            throw new DerivedDocumentTextNotReadyException(artifact.ObjectKey);
         }
-        catch (FileNotFoundException)
+
+        var excerpt = NormalizeExtractedText(extractedArtifact.ExtractedText);
+        if (excerpt.Length == 0)
         {
-            return new AiPromptAugmentation(prompt, [act.Eli.Value]);
+            return new AiPromptAugmentation(prompt, [act.Eli.Value, LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey)]);
         }
-        catch (DirectoryNotFoundException)
-        {
-            return new AiPromptAugmentation(prompt, [act.Eli.Value]);
-        }
+
+        var groundedPrompt = new StringBuilder(prompt.Length + excerpt.Length + 256)
+            .AppendLine(prompt)
+            .AppendLine()
+            .AppendLine("Material z dokumentu zrodlowego:")
+            .Append("- ELI: ").AppendLine(act.Eli.Value)
+            .Append("- Artefakt: ").AppendLine(LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey))
+            .AppendLine("Wyciag tekstu ze zrodla:")
+            .Append(excerpt)
+            .ToString();
+
+        return new AiPromptAugmentation(
+            groundedPrompt,
+            [act.Eli.Value, LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey)]);
     }
 
     private static string NormalizeExtractedText(string extractedText)

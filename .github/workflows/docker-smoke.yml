@@ -64,3 +64,6 @@ jobs:
 
       - name: Structured-log proof
         run: bash ops/run-structured-log-proof.sh --build-local
+
+      - name: Poison DLQ recovery smoke
+        run: bash ops/run-poison-dlq-recovery-smoke.sh --build-local

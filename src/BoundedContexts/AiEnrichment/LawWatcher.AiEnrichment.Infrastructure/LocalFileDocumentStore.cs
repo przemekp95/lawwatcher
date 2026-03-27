@@ -53,6 +53,23 @@ public sealed class LocalFileDocumentStore(string rootDirectory) : IDocumentStor
         return Task.FromResult(stream);
     }
 
+    public Task DeleteAsync(StoredDocumentReference reference, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var fullPath = GetFullPath(
+            NormalizeSegment(reference.Bucket, nameof(reference.Bucket), "Bucket"),
+            NormalizeObjectKey(reference.ObjectKey));
+
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private string GetFullPath(string bucket, string objectKey)
     {
         var fullPath = Path.GetFullPath(Path.Combine(_rootDirectory, bucket, objectKey.Replace('/', Path.DirectorySeparatorChar)));

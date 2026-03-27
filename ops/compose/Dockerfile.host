@@ -17,5 +17,11 @@ ARG APP_DLL
 WORKDIR /app
 ENV APP_DLL=${APP_DLL}
 ENV ASPNETCORE_URLS=http://+:8080
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-pol \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish/ .
 ENTRYPOINT ["sh", "-c", "dotnet \"$APP_DLL\""]

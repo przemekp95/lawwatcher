@@ -7,7 +7,31 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\LawWatcher.Worker.Ai\LawWatcher.Worker.Ai.csproj" AdditionalProperties="LawWatcherSuppressHostSettings=true" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Application\LawWatcher.AiEnrichment.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Contracts\LawWatcher.AiEnrichment.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Infrastructure\LawWatcher.AiEnrichment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Application\LawWatcher.LegalCorpus.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Contracts\LawWatcher.LegalCorpus.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Application\LawWatcher.LegislativeIntake.Application.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Contracts\LawWatcher.LegislativeIntake.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(LawWatcherSuppressHostSettings)' == 'true'">
+    <Content Update="appsettings.json;appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+    <None Update="appsettings.json;appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

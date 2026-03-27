@@ -76,6 +76,8 @@ while IFS= read -r eol_line; do
 done < <(git ls-files --eol '*.sh' '*.yml' '*.yaml' '*.example' '.dockerignore' '.gitattributes')
 
 docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.env.example config --services >/dev/null
+docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.env.example --profile ai config --services >/dev/null
 docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.full-host.yml --env-file ops/env/full-host.env.example --profile full-host --profile opensearch config --services >/dev/null
+docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.full-host.yml --env-file ops/env/full-host.env.example --profile ai --profile full-host config --services >/dev/null
 
 echo "Docker-first contract verification passed."

@@ -63,6 +63,11 @@ var effectiveSearchCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
     searchInfrastructureCapabilities);
 var aiInfrastructureCapabilities = new AiInfrastructureCapabilities(
     SupportsConfiguredLocalLlm: DetermineOllamaModelAvailability(runtimeOptions, localLlmOptions, ollamaOptions));
+var ocrInfrastructureCapabilities = new OcrInfrastructureCapabilities(
+    SupportsConfiguredDocumentPipeline:
+        sqlServerStorageConnectionString is not null
+        && rabbitMqConnectionString is not null
+        && DocumentStoreRuntimeResolver.Select(objectStorageOptions) == DocumentStoreBackend.S3Compatible);
 var readinessState = new HostReadinessState();
 
 builder.Logging.ClearProviders();
@@ -152,10 +157,15 @@ if (sqlServerStorageConnectionString is not null)
     builder.Services.AddSingleton<IOutboxMessageStore>(_ => new SqlServerOutboxStore(sqlServerStorageConnectionString));
     builder.Services.AddSingleton<IInboxStore>(_ => new SqlServerInboxStore(sqlServerStorageConnectionString));
     builder.Services.AddSingleton<IMessagingDiagnosticsStore>(_ => new SqlServerMessagingDiagnosticsStore(sqlServerStorageConnectionString));
-    builder.Services.AddSingleton<IRetentionMaintenanceStore>(_ => new SqlServerRetentionMaintenanceStore(sqlServerStorageConnectionString));
+    builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new SqlServerDocumentArtifactCatalogStore(sqlServerStorageConnectionString));
+    builder.Services.AddSingleton<IRetentionMaintenanceStore>(serviceProvider => new SqlServerRetentionMaintenanceStore(
+        sqlServerStorageConnectionString,
+        serviceProvider.GetRequiredService<IDocumentStore>(),
+        serviceProvider.GetRequiredService<IDocumentArtifactCatalog>()));
 }
 else
 {
+    builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new FileBackedDocumentArtifactCatalogStore(statePaths.DocumentArtifactsRoot));
     builder.Services.AddSingleton<IMessagingDiagnosticsStore>(_ => new DisabledMessagingDiagnosticsStore());
     builder.Services.AddSingleton<IRetentionMaintenanceStore>(_ => new DisabledRetentionMaintenanceStore());
 }
@@ -171,6 +181,7 @@ else
 }
 builder.Services.AddSingleton(searchInfrastructureCapabilities);
 builder.Services.AddSingleton(aiInfrastructureCapabilities);
+builder.Services.AddSingleton(ocrInfrastructureCapabilities);
 builder.Services.AddSingleton<ISystemCapabilitiesProvider, ConfigurationSystemCapabilitiesProvider>();
 builder.Services.AddSingleton(_ => new MessagingDiagnosticsQueryService(
     _.GetRequiredService<IMessagingDiagnosticsStore>(),
@@ -188,7 +199,6 @@ builder.Services.AddSingleton<IDocumentStore>(_ =>
             builder.Environment.ContentRootPath))
     };
 });
-builder.Services.AddSingleton<IOcrService, PlainTextOcrService>();
 if (effectiveSearchCapabilities.UseHybridSearch)
 {
     builder.Services.AddSingleton<IEmbeddingService>(serviceProvider =>

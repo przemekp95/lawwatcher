@@ -1,4 +1,4 @@
-using LawWatcher.Worker.Ai;
+using LawWatcher.Worker.Documents;
 
-var host = WorkerAiHostApplication.Build(args);
+var host = WorkerDocumentsHostApplication.Build(args);
 host.Run();

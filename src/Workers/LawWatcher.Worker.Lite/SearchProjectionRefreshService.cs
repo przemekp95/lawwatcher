@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using LawWatcher.AiEnrichment.Application;
 using LawWatcher.LegalCorpus.Application;
 using LawWatcher.LegislativeIntake.Application;
 using LawWatcher.LegislativeProcess.Application;
@@ -18,8 +19,10 @@ public sealed class SearchProjectionRefreshService(
     ActsQueryService actsQueryService,
     MonitoringProfilesQueryService profilesQueryService,
     AlertsQueryService alertsQueryService,
+    IDocumentArtifactCatalog documentArtifactCatalog,
     SearchIndexingService searchIndexingService)
 {
+    private const int MaxIndexedExtractedCharacters = 2400;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private string? _lastFingerprint;
 
@@ -30,19 +33,32 @@ public sealed class SearchProjectionRefreshService(
         var acts = await actsQueryService.GetActsAsync(cancellationToken);
         var profiles = await profilesQueryService.GetProfilesAsync(cancellationToken);
         var alerts = await alertsQueryService.GetAlertsAsync(cancellationToken);
+        var documentArtifacts = await documentArtifactCatalog.ListAsync(cancellationToken);
+        var extractedTextByOwner = documentArtifacts
+            .GroupBy(entry => $"{entry.OwnerType}:{entry.OwnerId:D}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                grouping => grouping.Key,
+                grouping => grouping
+                    .OrderByDescending(entry => entry.CreatedAtUtc)
+                    .First(),
+                StringComparer.OrdinalIgnoreCase);
 
         var documents = bills
             .Select(bill => new SearchSourceDocument(
                 $"bill:{bill.Id:D}",
                 bill.Title,
                 SearchDocumentKind.Bill,
-                $"Projekt {bill.ExternalId} ze zrodla {bill.SourceSystem}. Dokumenty: {FormatList(bill.DocumentKinds)}.",
+                AppendExtractedText(
+                    $"Projekt {bill.ExternalId} ze zrodla {bill.SourceSystem}. Dokumenty: {FormatList(bill.DocumentKinds)}.",
+                    TryGetExtractedText(extractedTextByOwner, "bill", bill.Id)),
                 [bill.ExternalId, bill.SourceSystem, .. bill.DocumentKinds]))
             .Concat(acts.Select(act => new SearchSourceDocument(
                 $"act:{act.Id:D}",
                 act.Title,
                 SearchDocumentKind.Act,
-                $"Opublikowany akt prawny. ELI: {act.Eli}. Artefakty: {FormatList(act.ArtifactKinds)}.",
+                AppendExtractedText(
+                    $"Opublikowany akt prawny. ELI: {act.Eli}. Artefakty: {FormatList(act.ArtifactKinds)}.",
+                    TryGetExtractedText(extractedTextByOwner, "act", act.Id)),
                 [act.BillExternalId, act.Eli, .. act.ArtifactKinds])))
             .Concat(processes.Select(process => new SearchSourceDocument(
                 $"process:{process.Id:D}",
@@ -102,4 +118,34 @@ public sealed class SearchProjectionRefreshService(
 
     private static string FormatList(IReadOnlyCollection<string> values) =>
         values.Count == 0 ? "brak" : string.Join(", ", values);
+
+    private static string? TryGetExtractedText(
+        IReadOnlyDictionary<string, DocumentArtifactCatalogEntry> extractedTextByOwner,
+        string ownerType,
+        Guid ownerId)
+    {
+        return extractedTextByOwner.TryGetValue($"{ownerType}:{ownerId:D}", out var entry)
+            ? entry.ExtractedText
+            : null;
+    }
+
+    private static string AppendExtractedText(string baseSnippet, string? extractedText)
+    {
+        var normalizedExtractedText = string.Join(
+            " ",
+            (extractedText ?? string.Empty)
+                .Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        if (normalizedExtractedText.Length == 0)
+        {
+            return baseSnippet;
+        }
+
+        if (normalizedExtractedText.Length > MaxIndexedExtractedCharacters)
+        {
+            normalizedExtractedText = normalizedExtractedText[..MaxIndexedExtractedCharacters];
+        }
+
+        return $"{baseSnippet} Tekst z dokumentu: {normalizedExtractedText}";
+    }
 }

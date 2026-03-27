@@ -152,7 +152,10 @@ wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_projection_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_notifications_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_replay_health_port}/health/ready" >/dev/null
+wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
+echo "Waiting for seeded act OCR artifacts..." >&2
+wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
 LISTENER_PORT="${listener_port}" CAPTURE_PATH="${capture_path}" node "${listener_script}" >"${listener_log}" 2>&1 &
 listener_pid=$!
@@ -224,6 +227,8 @@ if [[ "${listener_completed}" != "true" ]]; then
 fi
 
 wait_compose_logs_match "flow=ai" 90 "${compose_args[@]}" -- api worker-documents >/dev/null
+wait_compose_logs_match "flow=document-ocr" 90 "${compose_args[@]}" -- worker-documents >/dev/null
+wait_compose_logs_match "flow=document-text-projection" 90 "${compose_args[@]}" -- worker-projection >/dev/null
 wait_compose_logs_match "flow=replay" 90 "${compose_args[@]}" -- api worker-replay >/dev/null
 wait_compose_logs_match "flow=backfill" 90 "${compose_args[@]}" -- api worker-replay >/dev/null
 wait_compose_logs_match "flow=profile-subscription|flow=webhook-registration" 90 "${compose_args[@]}" -- api worker-notifications >/dev/null
@@ -235,4 +240,4 @@ COMPLETED_AI_TASK_JSON="${completed_ai_task_json}" \
 COMPLETED_REPLAY_JSON="${completed_replay_json}" \
 COMPLETED_BACKFILL_JSON="${completed_backfill_json}" \
 CAPTURES_JSON="$(cat "${capture_path}")" \
-node -e "const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const captures=JSON.parse(process.env.CAPTURES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), aiTaskStatus:aiTask.status, replayStatus:replay.status, backfillStatus:backfill.status, signedWebhookDispatchCount:captures.length, verifiedFlows:['ai','replay','backfill','admin-catch-up','signed-webhook']}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"
+node -e "const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const captures=JSON.parse(process.env.CAPTURES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), aiTaskStatus:aiTask.status, replayStatus:replay.status, backfillStatus:backfill.status, signedWebhookDispatchCount:captures.length, verifiedFlows:['ai','document-ocr','document-text-projection','replay','backfill','admin-catch-up','signed-webhook']}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"

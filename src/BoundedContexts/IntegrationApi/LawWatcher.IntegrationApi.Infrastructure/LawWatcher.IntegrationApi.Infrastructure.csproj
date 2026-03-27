@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\AiEnrichment\LawWatcher.AiEnrichment.Application\LawWatcher.AiEnrichment.Application.csproj" />
     <ProjectReference Include="..\LawWatcher.IntegrationApi.Application\LawWatcher.IntegrationApi.Application.csproj" />
     <ProjectReference Include="..\LawWatcher.IntegrationApi.Domain\LawWatcher.IntegrationApi.Domain.csproj" />
     <ProjectReference Include="..\LawWatcher.IntegrationApi.Contracts\LawWatcher.IntegrationApi.Contracts.csproj" />

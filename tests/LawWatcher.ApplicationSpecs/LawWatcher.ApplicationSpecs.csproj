@@ -36,6 +36,8 @@
     <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Application\LawWatcher.TaxonomyAndProfiles.Application.csproj" />
     <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Contracts\LawWatcher.TaxonomyAndProfiles.Contracts.csproj" />
     <ProjectReference Include="..\..\src\BoundedContexts\TaxonomyAndProfiles\LawWatcher.TaxonomyAndProfiles.Infrastructure\LawWatcher.TaxonomyAndProfiles.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Workers\LawWatcher.Worker.Documents\LawWatcher.Worker.Documents.csproj" />
+    <ProjectReference Include="..\..\src\Workers\LawWatcher.Worker.Lite\LawWatcher.Worker.Lite.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

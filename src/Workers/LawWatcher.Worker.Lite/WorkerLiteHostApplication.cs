@@ -1,5 +1,6 @@
 using LawWatcher.IntegrationApi.Application;
 using LawWatcher.IntegrationApi.Infrastructure;
+using LawWatcher.AiEnrichment.Application;
 using LawWatcher.AiEnrichment.Infrastructure;
 using LawWatcher.LegalCorpus.Application;
 using LawWatcher.LegalCorpus.Infrastructure;
@@ -56,6 +57,7 @@ var backfillPipelineEnabled = enabledPipelines.Contains("backfill");
 var readinessState = new HostReadinessState();
 Directory.CreateDirectory(statePaths.ReplaysRoot);
 Directory.CreateDirectory(statePaths.BackfillsRoot);
+Directory.CreateDirectory(statePaths.DocumentArtifactsRoot);
 Directory.CreateDirectory(statePaths.ProfileSubscriptionsRoot);
 Directory.CreateDirectory(statePaths.WebhookRegistrationsRoot);
 Directory.CreateDirectory(statePaths.BillAlertsRoot);
@@ -125,6 +127,7 @@ if (sqlServerStorageConnectionString is not null &&
             services.AddConsumer<MonitoringProfileDeactivatedConsumer>();
             services.AddConsumer<BillImportedConsumer>();
             services.AddConsumer<BillDocumentAttachedConsumer>();
+            services.AddConsumer<DocumentTextExtractedConsumer>();
             services.AddConsumer<LegislativeProcessStartedConsumer>();
             services.AddConsumer<LegislativeStageRecordedConsumer>();
             services.AddConsumer<PublishedActRegisteredConsumer>();
@@ -159,6 +162,7 @@ if (sqlServerStorageConnectionString is not null &&
 
     if (projectionPipelineEnabled)
     {
+        builder.Services.AddSingleton<DocumentTextProjectionMessageHandler>();
         builder.Services.AddSingleton<MonitoringProfileProjectionRefreshOrchestrator>();
         builder.Services.AddSingleton<IMonitoringProfileProjectionRefreshOrchestrator>(serviceProvider => serviceProvider.GetRequiredService<MonitoringProfileProjectionRefreshOrchestrator>());
         builder.Services.AddSingleton<MonitoringProfileProjectionMessageHandler>();
@@ -183,10 +187,12 @@ if (sqlServerStorageConnectionString is not null &&
 }
 if (sqlServerStorageConnectionString is not null)
 {
+    builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new SqlServerDocumentArtifactCatalogStore(sqlServerStorageConnectionString));
     builder.Services.AddSingleton<IMonitoringProfileReadRepository>(_ => new SqlServerMonitoringProfileProjectionStore(sqlServerStorageConnectionString));
 }
 else
 {
+    builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new FileBackedDocumentArtifactCatalogStore(statePaths.DocumentArtifactsRoot));
     builder.Services.AddSingleton<IMonitoringProfileReadRepository>(_ => new FileBackedMonitoringProfileProjectionStore(statePaths.MonitoringProfilesRoot));
 }
 if (sqlServerStorageConnectionString is not null)
@@ -520,24 +526,26 @@ static void ConfigureBrokerConsumerResiliency(IRabbitMqBusFactoryConfigurator co
 {
     configuration.UseDelayedRedelivery(redeliveryConfiguration =>
     {
+        redeliveryConfiguration.Handle<DerivedDocumentTextNotReadyException>();
         redeliveryConfiguration.Handle<SqlException>();
         redeliveryConfiguration.Handle<HttpRequestException>();
         redeliveryConfiguration.Handle<IOException>();
         redeliveryConfiguration.Handle<TimeoutException>();
         redeliveryConfiguration.Handle<TaskCanceledException>();
-        redeliveryConfiguration.Intervals(
-            TimeSpan.FromSeconds(15),
-            TimeSpan.FromMinutes(1),
-            TimeSpan.FromMinutes(5));
+        redeliveryConfiguration.Intervals(BrokerConsumerResiliency.DelayedRedeliveryIntervals);
     });
     configuration.UseMessageRetry(retryConfiguration =>
     {
+        retryConfiguration.Handle<DerivedDocumentTextNotReadyException>();
         retryConfiguration.Handle<SqlException>();
         retryConfiguration.Handle<HttpRequestException>();
         retryConfiguration.Handle<IOException>();
         retryConfiguration.Handle<TimeoutException>();
         retryConfiguration.Handle<TaskCanceledException>();
-        retryConfiguration.Interval(3, TimeSpan.FromSeconds(2));
+        retryConfiguration.Interval(
+            BrokerConsumerResiliency.ImmediateRetryCount,
+            BrokerConsumerResiliency.ImmediateRetryInterval);
     });
 }
+
 }

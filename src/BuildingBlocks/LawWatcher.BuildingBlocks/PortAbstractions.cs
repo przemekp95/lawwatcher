@@ -42,6 +42,8 @@ public interface IDocumentStore
     Task<StoredDocumentReference> PutAsync(DocumentWriteRequest request, CancellationToken cancellationToken);
 
     Task<Stream> OpenReadAsync(StoredDocumentReference reference, CancellationToken cancellationToken);
+
+    Task DeleteAsync(StoredDocumentReference reference, CancellationToken cancellationToken);
 }
 
 public interface IOcrService

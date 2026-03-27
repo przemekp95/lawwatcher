@@ -182,12 +182,25 @@ public sealed class AiEnrichmentExecutionService(
             return new AiEnrichmentExecutionResult(false, task.Id.Value, task.Status.Code);
         }
 
+        AiPromptAugmentation promptAugmentation;
+        try
+        {
+            promptAugmentation = await promptAugmentor.AugmentAsync(task.Subject, task.Prompt, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (DerivedDocumentTextNotReadyException)
+        {
+            throw;
+        }
+
         task.MarkStarted(DateTimeOffset.UtcNow);
         await SaveAndProjectAsync(task, cancellationToken);
 
         try
         {
-            var promptAugmentation = await promptAugmentor.AugmentAsync(task.Subject, task.Prompt, cancellationToken);
             var completion = await llmService.CompleteAsync(promptAugmentation.Prompt, cancellationToken);
             task.MarkCompleted(
                 completion.Model,

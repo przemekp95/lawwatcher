@@ -8,7 +8,7 @@ The supported operational contract is Docker-first and host-OS-neutral: raw `doc
 
 - `dev-laptop`: `sqlserver`, `rabbitmq`, `minio`, `api`, `portal`, `worker-lite`
 - `ai`: `ollama`, `worker-ai`
-- `full-host`: `api`, `portal`, `worker-projection`, `worker-notifications`, `worker-replay`, `worker-documents`, `sqlserver`, `rabbitmq`, `minio`, `ollama`
+- `full-host`: `api`, `portal`, `worker-ai`, `worker-projection`, `worker-notifications`, `worker-replay`, `worker-documents`, `sqlserver`, `rabbitmq`, `minio`, `ollama`
 - `opensearch`: optional add-on for `full-host`
 - when `ENABLE_OPENSEARCH=true`, Compose runs a one-shot `hybrid-init` preflight before `api` and `worker-projection`; it waits for `OpenSearch` and pulls the configured Ollama embedding model so `HybridVector` is computed truthfully on first boot
 
@@ -79,6 +79,7 @@ Use it to answer:
 - which broker endpoints currently have ready or unacked messages
 - whether broker consumers are attached to the expected endpoint queues
 - whether fault or dead-letter queues are accumulating messages
+- whether `document-text-extracted-ai-recovery` is recovering queued OCR-dependent AI tasks instead of leaving them stranded in `queued`
 
 If `deliveryMode=rabbitmq` and `pollerMode=fallback`, broker consumers are the main path and SQL poll loops are only safety nets.
 
@@ -174,11 +175,12 @@ Symptoms:
 
 - AI task stays pending
 - readiness for `worker-ai` is red
+- readiness for `worker-documents` is red
 - response lacks `ELI` or `document://` citations
 
 Actions:
 
-1. Run `ops/run-host-health-smoke.sh` and confirm `worker-ai` readiness.
+1. Run `ops/run-host-health-smoke.sh` and confirm both `worker-ai` and `worker-documents` readiness.
 2. Verify the container model:
 
 ```bash
@@ -192,7 +194,7 @@ If the runtime was started through a smoke wrapper on random local ports, prefer
 - `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
 - `ops/run-act-ai-grounding-minio-smoke.sh`
 
-If the MinIO grounding smoke is green but a user task is wrong, treat it as content or prompt quality investigation, not storage-path recovery.
+If the MinIO grounding smoke is green but a user task is wrong, treat it as content or prompt quality investigation, not OCR/storage-path recovery.
 
 ### Browser Admin Flow Fails
 
@@ -236,7 +238,7 @@ Guidance:
 - do not use retention as a substitute for replay, backfill or broker recovery
 - `search_documents` cleanup is opt-in through `searchDocumentsRetentionHours`
 - terminal AI-task cleanup is opt-in through `aiTasksRetentionHours`
-- `documentArtifactsRetentionHours` is exposed truthfully but currently returns an explicit unsupported reason; do not treat it as a working source-document delete lane
+- `documentArtifactsRetentionHours` prunes only cataloged derived OCR/AI artifacts; do not treat it as a source-document delete lane
 
 ### Restart Policy
 

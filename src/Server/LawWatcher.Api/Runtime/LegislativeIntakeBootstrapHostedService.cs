@@ -1,13 +1,27 @@
+using System.Text;
+using LawWatcher.BuildingBlocks.Ports;
 using LawWatcher.LegislativeIntake.Application;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class LegislativeIntakeBootstrapHostedService(
     BillsQueryService queryService,
+    IDocumentStore documentStore,
     LegislativeIntakeCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        await StoreSeedDocumentAsync(
+            documentStore,
+            "bills/X-310/original.txt",
+            "Projekt ustawy CIT przewiduje korekte zaliczek CIT oraz doprecyzowanie terminu wejscia w zycie.",
+            cancellationToken);
+        await StoreSeedDocumentAsync(
+            documentStore,
+            "bills/X-311/opinion.txt",
+            "Opinia do projektu VAT wskazuje na zmiany w JPK oraz przesuniecie obowiazkow raportowych.",
+            cancellationToken);
+
         var existingBills = await queryService.GetBillsAsync(cancellationToken);
         if (existingBills.Count != 0)
         {
@@ -25,7 +39,7 @@ public sealed class LegislativeIntakeBootstrapHostedService(
         await commandService.AttachDocumentAsync(new AttachBillDocumentCommand(
             citBillId,
             "draft",
-            "bills/X-310/original.pdf"), cancellationToken);
+            "bills/X-310/original.txt"), cancellationToken);
 
         var vatBillId = Guid.Parse("D8704FD8-91A0-477C-B7B4-A8FA7A12D526");
         await commandService.RegisterAsync(new RegisterBillCommand(
@@ -38,8 +52,25 @@ public sealed class LegislativeIntakeBootstrapHostedService(
         await commandService.AttachDocumentAsync(new AttachBillDocumentCommand(
             vatBillId,
             "opinion",
-            "bills/X-311/opinion.pdf"), cancellationToken);
+            "bills/X-311/opinion.txt"), cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private static async Task StoreSeedDocumentAsync(
+        IDocumentStore documentStore,
+        string objectKey,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var bytes = Encoding.UTF8.GetBytes(content);
+        await using var stream = new MemoryStream(bytes, writable: false);
+        await documentStore.PutAsync(
+            new DocumentWriteRequest(
+                LegislativeIntakeDocumentStorage.Bucket,
+                objectKey,
+                LegislativeIntakeDocumentStorage.GuessContentType(objectKey),
+                stream),
+            cancellationToken);
+    }
 }

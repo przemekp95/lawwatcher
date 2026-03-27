@@ -47,6 +47,7 @@ minio_console_port="$(get_free_port)"
 ollama_port="$(get_free_port)"
 worker_lite_health_port="$(get_free_port)"
 worker_ai_health_port="$(get_free_port)"
+worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
   "ops/env/dev-laptop.env.example" \
@@ -60,7 +61,9 @@ write_env_file_from_example \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "OLLAMA_HOST_PORT=${ollama_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
-  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}"
+  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
+  "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
+  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
 
 compose_args=(
   compose
@@ -97,8 +100,16 @@ worker_lite_live="$(wait_http_ok "http://127.0.0.1:${worker_lite_health_port}/he
 worker_lite_ready="$(wait_http_ok "http://127.0.0.1:${worker_lite_health_port}/health/ready")"
 worker_ai_live="$(wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/live")"
 worker_ai_ready="$(wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready")"
+worker_documents_live="$(wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity")"
+worker_documents_ready="$(wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready")"
 capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/system/capabilities")"
 services_json="$(docker_compose_json_array "${compose_args[@]}")"
+
+ocr_enabled="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(Boolean(data.ocrEnabled)));")"
+if [[ "$ocr_enabled" != "true" ]]; then
+  echo "Expected OCR capability to be enabled in host health smoke." >&2
+  exit 1
+fi
 
 API_LIVE="${api_live}" \
 API_READY="${api_ready}" \
@@ -106,9 +117,12 @@ WORKER_LITE_LIVE="${worker_lite_live}" \
 WORKER_LITE_READY="${worker_lite_ready}" \
 WORKER_AI_LIVE="${worker_ai_live}" \
 WORKER_AI_READY="${worker_ai_ready}" \
+WORKER_DOCUMENTS_LIVE="${worker_documents_live}" \
+WORKER_DOCUMENTS_READY="${worker_documents_ready}" \
 CAPABILITIES_JSON="${capabilities_json}" \
 SERVICES_JSON="${services_json}" \
 API_PORT="${api_port}" \
 WORKER_LITE_PORT="${worker_lite_health_port}" \
 WORKER_AI_PORT="${worker_ai_health_port}" \
-node -e "const apiLive=JSON.parse(process.env.API_LIVE); const apiReady=JSON.parse(process.env.API_READY); const workerLiteLive=JSON.parse(process.env.WORKER_LITE_LIVE); const workerLiteReady=JSON.parse(process.env.WORKER_LITE_READY); const workerAiLive=JSON.parse(process.env.WORKER_AI_LIVE); const workerAiReady=JSON.parse(process.env.WORKER_AI_READY); const capabilities=JSON.parse(process.env.CAPABILITIES_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), api:{baseUrl:'http://127.0.0.1:' + process.env.API_PORT, liveStatus:apiLive.status, readyStatus:apiReady.status, readyEntries:Object.keys(apiReady.entries||{})}, workerLite:{baseUrl:'http://127.0.0.1:' + process.env.WORKER_LITE_PORT, liveStatus:workerLiteLive.status, readyStatus:workerLiteReady.status, readyEntries:Object.keys(workerLiteReady.entries||{})}, workerAi:{baseUrl:'http://127.0.0.1:' + process.env.WORKER_AI_PORT, liveStatus:workerAiLive.status, readyStatus:workerAiReady.status, readyEntries:Object.keys(workerAiReady.entries||{})}, apiCapabilitiesProfile:capabilities.runtimeProfile, services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"
+WORKER_DOCUMENTS_PORT="${worker_documents_health_port}" \
+node -e "const apiLive=JSON.parse(process.env.API_LIVE); const apiReady=JSON.parse(process.env.API_READY); const workerLiteLive=JSON.parse(process.env.WORKER_LITE_LIVE); const workerLiteReady=JSON.parse(process.env.WORKER_LITE_READY); const workerAiLive=JSON.parse(process.env.WORKER_AI_LIVE); const workerAiReady=JSON.parse(process.env.WORKER_AI_READY); const workerDocumentsLive=JSON.parse(process.env.WORKER_DOCUMENTS_LIVE); const workerDocumentsReady=JSON.parse(process.env.WORKER_DOCUMENTS_READY); const capabilities=JSON.parse(process.env.CAPABILITIES_JSON); const services=JSON.parse(process.env.SERVICES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), api:{baseUrl:'http://127.0.0.1:' + process.env.API_PORT, liveStatus:apiLive.status, readyStatus:apiReady.status, readyEntries:Object.keys(apiReady.entries||{})}, workerLite:{baseUrl:'http://127.0.0.1:' + process.env.WORKER_LITE_PORT, liveStatus:workerLiteLive.status, readyStatus:workerLiteReady.status, readyEntries:Object.keys(workerLiteReady.entries||{})}, workerAi:{baseUrl:'http://127.0.0.1:' + process.env.WORKER_AI_PORT, liveStatus:workerAiLive.status, readyStatus:workerAiReady.status, readyEntries:Object.keys(workerAiReady.entries||{})}, workerDocuments:{baseUrl:'http://127.0.0.1:' + process.env.WORKER_DOCUMENTS_PORT, liveStatus:workerDocumentsLive.status, readyStatus:workerDocumentsReady.status, readyEntries:Object.keys(workerDocumentsReady.entries||{})}, apiCapabilitiesProfile:capabilities.runtimeProfile, ocrEnabled:Boolean(capabilities.ocrEnabled), services:Object.fromEntries(services.map(item => [item.Service, item.State]))}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"
