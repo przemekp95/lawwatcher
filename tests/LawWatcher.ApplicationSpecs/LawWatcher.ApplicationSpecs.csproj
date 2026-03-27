@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Server\LawWatcher.Api\LawWatcher.Api.csproj" />
     <ProjectReference Include="..\..\src\BuildingBlocks\LawWatcher.BuildingBlocks\LawWatcher.BuildingBlocks.csproj" />
     <ProjectReference Include="..\..\src\SharedKernel\LawWatcher.SharedKernel\LawWatcher.SharedKernel.csproj" />
     <ProjectReference Include="..\..\src\BoundedContexts\SearchAndDiscovery\LawWatcher.SearchAndDiscovery.Application\LawWatcher.SearchAndDiscovery.Application.csproj" />

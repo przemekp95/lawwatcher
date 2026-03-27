@@ -21,7 +21,7 @@ public sealed class PlainTextOcrService(IDocumentStore documentStore) : IOcrServ
         var extractedText = await reader.ReadToEndAsync(cancellationToken);
         var warnings = document.ContentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
             ? Array.Empty<string>()
-            : ["Content type is not text/*; OCR adapter treated the document as UTF-8 text."];
+            : ["Content type is not text/*; plain-text extraction treated the document as UTF-8 text."];
 
         return new OcrResult(extractedText, warnings);
     }

@@ -13,9 +13,9 @@ Mozemy powiedziec, ze projekt jest "absolutely done" dopiero wtedy, gdy jednocze
 - `dev-laptop` dziala end-to-end bez seed-only obchodow i bez recznego dogrzebywania sie do stanu.
 - `sqlserver` jest glownym, normalnym runtime dla core flow, a nie tylko czesciowym adapterem.
 - `RabbitMQ + MassTransit` sa realnie wpiete jako normalny transport messagingowy i maja swiezy dowod wykonaniowy na brokerze, nie tylko kod i smoke harnessy.
-- `full-host` istnieje jako prawdziwy runtime z prawdziwymi workerami, nie tylko jako deklaracja topologii.
-- search backendi sa domkniete: `ProjectionIndex`, `SqlFullText` i opcjonalny `OpenSearch/HybridVector` maja realne adaptery i swieze dowody wykonaniowe dla profili, ktore deklarujemy.
-- object/document pipeline jest domkniety end-to-end na docelowym backendzie, a runtime capability truthfulness odpowiada rzeczywistemu zachowaniu.
+- `full-host` istnieje jako prawdziwy runtime z prawdziwymi workerami i wymaganym `OpenSearch/HybridVector` dla produkcyjnego semantic search, a nie tylko jako deklaracja topologii.
+- search backendi sa domkniete: wspierany laptop-first `ProjectionIndex` i wymagany dla `full-host` `OpenSearch/HybridVector` maja realne adaptery i swieze dowody wykonaniowe dla profili, ktore deklarujemy; `SqlFullText` pozostaje opt-in adapterem poza obecna support matrix, dopoki nie dostanie dedykowanego proofu runtime.
+- object/document pipeline jest domkniety end-to-end na docelowym backendzie `MinIO`, z realnym OCR i truthful capability reportingiem odpowiadajacym rzeczywistemu zachowaniu.
 - portal i API pokrywaja docelowy sposob obslugi produktu, a nie tylko dashboard, seed data i smoke-only write pathy.
 - verification obejmuje build, runtime specs, browser-level verification, SQL runtime, messaging runtime i profile operacyjne, ktore deklarujemy jako wspierane.
 
@@ -44,7 +44,18 @@ Mozna uczciwie powiedziec:
 Nie mozna jeszcze uczciwie powiedziec:
 
 - ze compose/images/deploy sa finalnie domkniete
-- ze object/document pipeline ma juz finalny, jednoznacznie zamkniety backend i capability stance dla OCR/embeddings
+- ze object/document pipeline ma juz dowiezione finalne adaptery i runtime proof dla przyjetego kierunku: `MinIO` jako default, realny OCR i produkcyjny semantic search
+
+## Locked Product Decisions
+
+Te kierunki nie sa juz otwarte i nie powinny wracac jako pytania backlogowe:
+
+- `ProjectionIndex` zostaje finalnym laptop-first search backendem; `SqlFullText` pozostaje opt-in adapterem poza obecna support matrix, dopoki nie dostanie dedykowanego proofu runtime.
+- `OpenSearch/HybridVector` jest wymagane do uznania `full-host` za done, a semantic search jest funkcja produkcyjna, nie tylko architektonicznym przygotowaniem.
+- `MinIO` jest finalnym, docelowym defaultem dla document/artifact storage w wspieranym runtime.
+- finalnym kierunkiem dla OCR jest realny OCR; obecny `PlainTextOcrService` jest tylko adapterem przejsciowym, dopoki nie zostanie podmieniony na docelowa implementacje.
+- finalny operational write surface to obecny admin CRUD plus ingest-driven core flow; seed data, demo tokeny i smoke harnessy nie sa wspieranym write path.
+- gdy `RabbitMQ` jest skonfigurowane, broker jest normalna sciezka runtime; SQL poller zostaje fallbackiem/recovery, a nie rownorzednym primary transportem.
 
 ## Closing Backlog
 
@@ -84,10 +95,12 @@ Pozostalo:
   Status:
   wspierane profile Docker `dev-laptop`, `dev-laptop --include-ai`, `full-host` i `full-host --include-opensearch` maja juz swiezy green na prawdziwym `RabbitMQ` w kontenerach.
 - [ ] Domknac retry, defer, poison handling i DLQ.
-- [ ] Uporzadkowac stance runtime: SQL poller jako jawny fallback/recovery, a nie rownorzedna normalna sciezka.
+- [x] Zamknac stance runtime: SQL poller jako jawny fallback/recovery, a nie rownorzedna normalna sciezka.
+  Status:
+  finalna decyzja jest zamknieta: w profilach z `RabbitMQ` broker jest normalna sciezka runtime, a SQL poller zostaje tylko jako fallback/recovery i bounded catch-up, nie jako rownorzedny primary transport.
 - [ ] Odtworzyc wspierany, kontenerowy proof, ze write path nie czeka na AI/OCR/search/dispatch po stronie broker mode.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, ale nadal potrzebuje swiezego wykonaniowego proofu w runtime z dostepnym Dockerem.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, a workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`; nadal potrzeba swiezego zielonego wykonania jako dowodu runtime.
 
 Exit criteria:
 
@@ -121,15 +134,14 @@ Exit criteria:
 
 Status juz zrobione:
 
-- `ProjectionIndex` i truthful `SqlFullText` fallback semantics istnieja
-- runtime truthfulness dla `ProjectionIndex` versus `SqlFullText` jest juz obslugiwane w API
+- `ProjectionIndex` jest finalnym, wspieranym laptop-first search backendem
+- runtime truthfulness dla `ProjectionIndex` versus opt-in `SqlFullText` jest juz obslugiwane w API
 
 Pozostalo:
 
 - [x] Domknac realny `OpenSearch` adapter dla search/indexing.
 - [x] Dodac realny `HybridVector` indexing/query path.
 - [x] Zastapic placeholder/dev-only embedding path tam, gdzie obiecujemy semantic/hybrid behavior.
-- [ ] Zweryfikowac runtime branch `SqlFullText` na hoscie, gdzie FTS jest faktycznie zainstalowany.
 - [x] Udowodnic capability truthfulness dla trzech stanow:
 - `ProjectionIndex`
 - `SqlFullText`
@@ -138,7 +150,7 @@ Pozostalo:
 Exit criteria:
 
 - `GET /v1/system/capabilities` i `GET /v1/search` poprawnie raportuja realny backend
-- istnieje swiezy smoke dla `SqlFullText`
+- istnieje swiezy smoke dla wspieranego `ProjectionIndex`
 - istnieje swiezy smoke dla `OpenSearch/HybridVector`
   Status:
   `ops/run-docker-full-host-smoke.sh --include-opensearch` jest juz swiezo zielony i potwierdza backend `HybridVector (1)` na `/v1/search` oraz `/v1/system/capabilities`, zdrowy `OpenSearch` i realne `nomic-embed-text` embeddings.
@@ -150,14 +162,17 @@ Status juz zrobione:
 
 - object/document pipeline istnieje
 - AI grounding przez stored artifacts istnieje
-- `MinIO` jest realnym backendem za `IDocumentStore`
+- `MinIO` jest finalnym, docelowym backendem za `IDocumentStore` dla wspieranego runtime
 - `ollama` jest project-managed, a local LLM ma bootstrap i smoke path
 
 Pozostalo:
 
 - [x] Miec swiezy end-to-end runtime smoke na realnym backendzie `MinIO`, nie tylko local filesystem fallback.
-- [ ] Zdecydowac, czy `PlainTextOcrService` i `DeterministicEmbeddingService` sa finalne czy tylko laptop-first adaptery.
-- [ ] Jesli nie sa finalne, podmienic je na docelowe adaptery albo jawnie zdegradowac capability w produkcie i dokumentacji.
+- [x] Zamknac decyzje o roli `PlainTextOcrService` i `DeterministicEmbeddingService`.
+  Status:
+  finalna decyzja jest zamknieta: produkt ma dowiezc realny OCR; obecny `PlainTextOcrService` jest adapterem przejsciowym i nie jest finalnym OCR. `DeterministicEmbeddingService` pozostaje test-only, a produkcyjny embedding path zostaje zwiazany z `OpenSearch + Ollama`.
+- [ ] Podmienic `PlainTextOcrService` na docelowy adapter real OCR i ustawic truthful capability/reporting na podstawie realnej gotowosci runtime.
+- [ ] Domknac finalny OCR-to-artifact/index flow dla source documents, tak zeby AI grounding i semantic search nie opieraly sie na placeholderze plain-text extraction.
 - [ ] Domknac retention/cleanup dla artefaktow dokumentowych i wynikow AI.
   Status:
   `POST /v1/system/maintenance/retention` obejmuje juz opt-in cleanup terminalnych `ai_enrichment_tasks` przez `aiTasksRetentionHours`, ale `documentArtifactsRetentionHours` pozostaje truthful `unsupported`, dopoki runtime nie ma bezpiecznej metadanej ownership/expiry dla destrukcyjnego cleanupu source artifacts.
@@ -179,9 +194,12 @@ Status juz zrobione:
 
 Pozostalo:
 
-- [ ] Zdecydowac, czy jest jeszcze jakis istotny operacyjny write surface poza obecnym admin CRUD i ingest-driven core flow.
-- [ ] Jesli tak, dopiac brakujace write pathy swiadomie, a nie przez seed/bootstrap.
-- [ ] Uporzadkowac role seed data tak, zeby byly tylko development/demo aid, a nie cicha proteza brakujacego flow.
+- [x] Zamknac decyzje o finalnym operational write surface.
+  Status:
+  finalna decyzja jest zamknieta: nie ma juz dodatkowego deklarowanego operational write surface poza obecnym admin CRUD i ingest-driven core flow. Seed data, demo tokeny i smoke harnessy nie sa wspieranym write path i nie maja rozszerzac powierzchni produktu.
+- [x] Uporzadkowac role seed data tak, zeby byly tylko development/demo aid, a nie cicha proteza brakujacego flow.
+  Status:
+  checked-in env defaults trzymaja demo seedy wylaczone, a smoke lane'y wlaczaja je jawnie tylko tam, gdzie sa potrzebne do dev/demo proofu. Wspierany operational path nie zalezy od seed data.
 - [x] Utrzymac i dokumentowac rozdzial browser auth versus M2M auth jako finalny kontrakt produktu.
   Status:
   [README.md](README.md) jawnie opisuje juz finalny kontrakt: browser admin flow idzie przez operator `cookie + antiforgery`, a `ai/replays/backfills` i pozostale M2M write pathy pozostaja bearer-only bez cookies i bez browser session. Swiezy proof istnieje zarowno po stronie backendu przez `ops/run-operator-admin-smoke.sh`, jak i po stronie przegladarki przez `ops/run-operator-admin-browser-smoke.sh`.
@@ -198,13 +216,13 @@ Pozostalo:
 
 - [ ] Zamienic compose/image scaffolding na realne build/publish artifacts dla wszystkich hostow.
   Status:
-  Bazowy `ops/compose/docker-compose.yml` i `ops/compose/docker-compose.full-host.yml` sa juz image-first i uzywaja jawnych `LAWWATCHER_*_IMAGE` zamiast lokalnego `build:`. Lokalne buildy zostaly odsuniete do `ops/compose/docker-compose.build.yml` oraz `ops/compose/docker-compose.full-host.build.yml`, `.github/workflows/publish-images.yml` przygotowuje linuxowe obrazy `ghcr.io/<owner>/lawwatcher-*`, a repo ma juz publiczny remote `https://github.com/przemekp95/lawwatcher`. Dla szybkiej iteracji branch push na `main/master` publikuje tylko `linux/amd64`, a wolniejszy multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Workflow ma juz tez post-publish `ghcr-image-smoke` przez `ops/run-ghcr-image-smoke.sh`, ale nadal potrzeba swiezego zielonego proofu z CI jako dowodu wykonaniowego.
-- [ ] Dodac finalne Dockerfile lub rownowazny packaging flow.
+  Bazowy `ops/compose/docker-compose.yml` i `ops/compose/docker-compose.full-host.yml` sa juz image-first i uzywaja jawnych `LAWWATCHER_*_IMAGE` zamiast lokalnego `build:`. Lokalne buildy zostaly odsuniete do `ops/compose/docker-compose.build.yml` oraz `ops/compose/docker-compose.full-host.build.yml`, `.github/workflows/publish-images.yml` przygotowuje linuxowe obrazy `ghcr.io/<owner>/lawwatcher-*`, a repo ma juz publiczny remote `https://github.com/przemekp95/lawwatcher`. Dla szybkiej iteracji branch push na `main/master` publikuje tylko `linux/amd64`, a wolniejszy multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Workflow ma juz tez post-publish `ghcr-image-smoke` przez `ops/run-ghcr-image-smoke.sh` oraz image-first `ghcr-ops-proofs` na `workflow_dispatch`, ale nadal potrzeba swiezego zielonego proofu z CI jako dowodu wykonaniowego.
+- [x] Dodac finalne Dockerfile lub rownowazny packaging flow.
   Status:
-  `ops/compose/Dockerfile.host` jest juz wspolnym packaging flow dla hostow, `.dockerignore` ogranicza kontekst, a workflow `publish-images.yml` buduje obrazy dla `api`, `portal`, `worker-lite`, `worker-ai`, `worker-documents`, `worker-projection`, `worker-notifications` i `worker-replay`. Dla branch push zostaje szybszy `linux/amd64`, a pelny multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Nadal otwarty pozostaje runtime proof z samego GHCR, a nie tylko lokalnego build override.
+  `ops/compose/Dockerfile.host` jest juz wspolnym packaging flow dla hostow, `.dockerignore` ogranicza kontekst, a workflow `publish-images.yml` buduje obrazy dla `api`, `portal`, `worker-lite`, `worker-ai`, `worker-documents`, `worker-projection`, `worker-notifications` i `worker-replay`. Otwarty pozostaje juz nie sam Dockerfile, tylko runtime proof z samego GHCR, a nie tylko lokalnego build override.
 - [ ] Zweryfikowac `docker compose up` dla deklarowanych profili.
   Status:
-  `dev-laptop`, `full-host` i `full-host + opensearch` sa juz swiezo zweryfikowane lokalnie przez build override. Nadal otwarty jest swiezy proof image-first `docker compose pull && up` z realnymi obrazami z GHCR.
+  `dev-laptop`, `full-host` i `full-host + opensearch` sa juz swiezo zweryfikowane lokalnie przez build override. Dla finalnego done-state decydujacy jest `full-host + opensearch`; nadal otwarty jest swiezy proof image-first `docker compose pull && up` z realnymi obrazami z GHCR.
 - [ ] Uporzadkowac env/config contracts tak, zeby byly zgodne z kodem i README.
   Status:
   `dev-laptop` i `full-host` env keys dla SQL sa juz wyrownane do `ConnectionStrings__LawWatcherSqlServer`, a env files maja juz jawne `LAWWATCHER_*_IMAGE`. Nadal trzeba dowiezc finalny proof, ze README i GHCR naming zgadzaja sie z rzeczywistym workflow push.
@@ -235,10 +253,10 @@ Pozostalo:
   `search_documents` maja juz jawnie opt-in cleanup przez `searchDocumentsRetentionHours` na `POST /v1/system/maintenance/retention`, oparty o `indexed_at_utc` zamiast ukrytego TTL.
 - [ ] Odtworzyc Linux/Docker-first proof dla retention cleanup po usunieciu dawnego dedykowanego harnessu.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, ale potrzebuje jeszcze swiezego green proof w runtime z dostepnym Dockerem.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, a workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`; nadal potrzeba swiezego green proof jako dowodu runtime.
 - [ ] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu dawnego broker smoke lane.
   Status:
-  dedykowany shellowy proof istnieje juz jako `ops/run-structured-log-proof.sh`, a runtime ma stabilny marker `flow=signed-webhook`, ale potrzeba jeszcze swiezego green proof w runtime z dostepnym Dockerem.
+  dedykowany shellowy proof istnieje juz jako `ops/run-structured-log-proof.sh`, a runtime ma stabilny marker `flow=signed-webhook`; workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`, ale potrzeba jeszcze swiezego green proof jako dowodu runtime.
 - [x] Dodac runbook dla awarii runtime i odtwarzania state/projection.
   Status:
   [docs/RUNBOOK.md](docs/RUNBOOK.md) istnieje juz jako operacyjny runbook dla `dev-laptop`, `ai`, `full-host` i `opensearch`, obejmuje first-response checks, health, Docker/RabbitMQ recovery, `/v1/system/messaging`, retention, broker smoke map, browser admin recovery i zasady bezpiecznego odtwarzania state/projection bez recznego kasowania `outbox/inbox`.
@@ -267,8 +285,6 @@ Pozostalo:
 - [x] Miec swiezy broker-backed smoke, ktory faktycznie przechodzi na maszynie z dzialajacym `RabbitMQ`.
   Status:
   wspierane profile Docker `dev-laptop`, `dev-laptop --include-ai`, `full-host` i `full-host --include-opensearch` sa juz swiezo zielone na prawdziwym `RabbitMQ`.
-- [ ] Miec swiezy runtime smoke:
-- `dev-laptop/files`
 - [x] Miec swiezy runtime smoke:
 - `dev-laptop/sqlserver`
 - `ai`
@@ -277,12 +293,11 @@ Pozostalo:
 - [x] Miec swiezy runtime smoke:
 - `full-host`
   Status:
-  `ops/run-docker-full-host-smoke.sh` jest juz swiezo zielony na realnym Docker runtime z `api + portal + worker-projection + worker-notifications + worker-replay + worker-documents + sqlserver + rabbitmq + minio + ollama`.
-- [x] Miec swiezy AI grounding smoke na docelowym object store backendzie, jesli finalnie to `MinIO` ma byc deklarowanym defaultem dla tego flow.
+  `ops/run-docker-full-host-smoke.sh` jest juz swiezo zielony na realnym Docker runtime z `api + portal + worker-projection + worker-notifications + worker-replay + worker-documents + sqlserver + rabbitmq + minio + ollama`. Dla finalnego product contractu decydujacy runtime proof pozostaje jednak lane `full-host + opensearch`.
+- [x] Miec swiezy AI grounding smoke na docelowym object store backendzie `MinIO`.
   Status:
   `ops/run-act-ai-grounding-minio-smoke.sh` jest juz swiezo zielony na realnym `MinIO + Ollama`.
-- [ ] Miec swiezy search smoke dla hosta z prawdziwym `SqlFullText`.
-- [x] Miec swiezy smoke dla `OpenSearch/HybridVector`, jesli ten profil ma byc deklarowany jako wspierany.
+- [x] Miec swiezy smoke dla wymaganego `OpenSearch/HybridVector` w `full-host`.
   Status:
   `ops/run-docker-full-host-smoke.sh --include-opensearch` jest juz swiezo zielony na realnym Docker runtime z `api + portal + worker-projection + worker-notifications + worker-replay + worker-documents + sqlserver + rabbitmq + minio + ollama + opensearch`.
 
@@ -290,24 +305,8 @@ Exit criteria:
 
 - wszystkie profile, ktore deklarujemy w README, maja swiezy dowod wykonaniowy
 
-## Probably Optional, But Must Be Decided Explicitly
-
-To nie sa automatycznie braki. To sa rzeczy, ktore trzeba jawnie zatwierdzic jako:
-
-- finalne
-- odlozone poza v1
-- swiadomie niewspierane
-
-Lista:
-
-- [ ] Czy `ProjectionIndex` fallback zostaje finalnym laptop-first search backendem, czy ma byc tylko awaryjny?
-- [ ] Czy `OpenSearch` jest wymagane do uznania `full-host` za done?
-- [ ] Czy OCR ma byc "real OCR", czy wystarczy obecny capability level?
-- [ ] Czy semantic search ma byc produkcyjnie wlaczone, czy tylko architektonicznie przygotowane?
-- [ ] Czy finalnym object store defaultem ma byc zawsze `MinIO`, czy dopuszczamy jawnie rownorzedny finalny backend lokalny?
-
 ## Minimal Honest Statement Today
 
 Dzis mozna uczciwie powiedziec:
 
-"LawWatcher ma mocny laptop-first foundation, duza czesc runtime SQL-backed, operator-secured admin CRUD w API i portalu, project-managed lokalny LLM oraz swiezo zielone Docker i RabbitMQ runtime dla `dev-laptop`, `full-host`, `full-host + opensearch` i glownych brokerowych slice'ow. Nie jest jeszcze finalnie domkniety jako caly produkt. Najwieksze otwarte tematy to finalne packaging/deploy dla wszystkich deklarowanych hostow, swiezy runtime dowod dla prawdziwego `SqlFullText`, oraz koncowe domkniecie object/document runtime i pozostalego ops hardeningu."
+"LawWatcher ma mocny laptop-first foundation, duza czesc runtime SQL-backed, operator-secured admin CRUD w API i portalu, project-managed lokalny LLM oraz swiezo zielone Docker i RabbitMQ runtime dla `dev-laptop`, `full-host` i wymaganego `full-host + opensearch` dla semantic search. Kierunek produktu jest juz zamkniety: `ProjectionIndex` zostaje laptop-first baseline, `OpenSearch/HybridVector` jest wymagane dla `full-host`, `MinIO` jest finalnym object store defaultem, a OCR ma byc realnym OCR. Nie jest jeszcze finalnie domkniety jako caly produkt. Najwieksze otwarte tematy to finalne packaging/deploy dla wszystkich deklarowanych hostow, podmiana placeholderowego OCR na docelowy runtime i pozostaly ops hardening."

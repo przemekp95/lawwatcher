@@ -11,7 +11,7 @@
         <p class="eyebrow">Search and discovery</p>
         <h1>Search the legislative corpus</h1>
         <p class="lede">
-            The laptop-first profile uses the same API contract for search while keeping SQL full-text as the baseline backend.
+            The laptop-first profile keeps the search contract stable while defaulting to the durable projection index and only using stronger backends when the runtime can prove them.
         </p>
     </div>
 
@@ -130,5 +130,10 @@
     }
 
     private static string GetBackendLabel(PortalSearchData state) =>
-        state.Backend == SearchBackend.HybridVector ? "hybrid/vector" : "sql-fts";
+        state.Backend switch
+        {
+            SearchBackend.HybridVector => "hybrid/vector",
+            SearchBackend.SqlFullText => "sql-fts",
+            _ => "projection index"
+        };
 }

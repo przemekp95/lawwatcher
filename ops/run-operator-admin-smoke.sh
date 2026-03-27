@@ -53,7 +53,8 @@ write_env_file_from_example \
   "MINIO_API_PORT=${minio_api_port}" \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
-  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false"
+  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTOPERATORSEED=true"
 
 compose_args=(
   compose

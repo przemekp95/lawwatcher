@@ -70,7 +70,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
           tags: |
-            type=sha,prefix=sha-
+            type=sha,format=long,prefix=sha-
             type=ref,event=branch
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
@@ -109,3 +109,37 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_SHA: ${{ github.sha }}
         run: bash ops/run-ghcr-image-smoke.sh
+
+  ghcr-ops-proofs:
+    if: github.event_name == 'workflow_dispatch'
+    needs: ghcr-image-smoke
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: sha-${{ github.sha }}
+      LAWWATCHER_API_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-api:sha-${{ github.sha }}
+      LAWWATCHER_PORTAL_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-portal:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_LITE_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-lite:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_AI_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-ai:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_DOCUMENTS_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-documents:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_NOTIFICATIONS_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-notifications:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_PROJECTION_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-projection:sha-${{ github.sha }}
+      LAWWATCHER_WORKER_REPLAY_IMAGE: ghcr.io/${{ github.repository_owner }}/lawwatcher-worker-replay:sha-${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: RabbitMQ write-path nonblocking smoke
+        run: bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh
+
+      - name: Retention smoke
+        run: bash ops/run-retention-smoke.sh
+
+      - name: Structured-log proof
+        run: bash ops/run-structured-log-proof.sh

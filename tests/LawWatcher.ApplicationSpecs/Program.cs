@@ -2,6 +2,7 @@ using LawWatcher.AiEnrichment.Application;
 using LawWatcher.AiEnrichment.Contracts;
 using LawWatcher.AiEnrichment.Domain.Tasks;
 using LawWatcher.AiEnrichment.Infrastructure;
+using LawWatcher.Api.Runtime;
 using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.BuildingBlocks.Messaging;
 using LawWatcher.BuildingBlocks.Ports;
@@ -40,6 +41,7 @@ using LawWatcher.TaxonomyAndProfiles.Domain.MonitoringProfiles;
 using LawWatcher.TaxonomyAndProfiles.Domain.Subscriptions;
 using LawWatcher.TaxonomyAndProfiles.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -64,11 +66,22 @@ var capabilities = SystemCapabilities.FromOptions(
 Expect.True(capabilities.Ai.Enabled, "AI should remain enabled on laptop-first profile.", failures);
 Expect.Equal(AiActivationMode.OnDemand, capabilities.Ai.ActivationMode, "Laptop-first profile should use on-demand local LLM activation.", failures);
 Expect.Equal(TimeSpan.FromMinutes(2), capabilities.Ai.UnloadAfterIdle, "Laptop-first profile should unload the local model after a short idle period.", failures);
-Expect.True(capabilities.Search.UseSqlFullText, "SQL Full-Text should be the baseline search backend on laptop-first profile.", failures);
+Expect.False(capabilities.Search.UseSqlFullText, "Projection index should be the supported baseline search backend on laptop-first profile.", failures);
 Expect.False(capabilities.Search.UseHybridSearch, "Hybrid search should stay disabled on laptop-first profile by default.", failures);
 
 var selector = new SearchBackendSelector();
-Expect.Equal(SearchBackend.SqlFullText, selector.Select(capabilities.Search), "Search backend selector should prefer SQL Full-Text when hybrid search is unavailable.", failures);
+Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(capabilities.Search), "Search backend selector should use the projection index when laptop-first SQL Full-Text is not explicitly enabled.", failures);
+
+var sqlFullTextCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
+    capabilities.Search with
+    {
+        UseSqlFullText = true
+    },
+    new SearchInfrastructureCapabilities(
+        SupportsSqlFullText: true,
+        SupportsHybridSearch: false));
+Expect.True(sqlFullTextCapabilities.UseSqlFullText, "Effective search capabilities should allow SQL Full-Text when it is explicitly enabled and the runtime can provide it.", failures);
+Expect.Equal(SearchBackend.SqlFullText, selector.Select(sqlFullTextCapabilities), "Search backend selector should still prefer SQL Full-Text when it is explicitly enabled and available.", failures);
 
 var degradedSearchCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
     capabilities.Search,
@@ -108,7 +121,7 @@ var degradedFullHostCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
         SupportsHybridSearch: false));
 Expect.False(degradedFullHostCapabilities.UseHybridSearch, "Effective search capabilities should disable hybrid search when OpenSearch runtime support is unavailable.", failures);
 Expect.False(degradedFullHostCapabilities.UseSemanticSearch, "Effective search capabilities should disable semantic search when OpenSearch runtime support is unavailable.", failures);
-Expect.Equal(SearchBackend.SqlFullText, selector.Select(degradedFullHostCapabilities), "Search backend selector should fall back to SQL Full-Text when hybrid search is configured but OpenSearch support is unavailable.", failures);
+Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(degradedFullHostCapabilities), "Search backend selector should fall back to the projection index when hybrid search is configured but unavailable.", failures);
 
 var llmPolicy = LocalLlmExecutionPolicy.For(RuntimeProfile.DevLaptop);
 Expect.Equal(AiActivationMode.OnDemand, llmPolicy.ActivationMode, "Local LLM execution policy should stay on-demand for the laptop profile.", failures);
@@ -1831,7 +1844,15 @@ Expect.True(groundedAiResult.HasProcessedTask, "AI execution service should proc
 Expect.Equal("completed", groundedCompletedTask.Status, "Grounded act enrichment should complete when the source artifact is available in the document store.", failures);
 Expect.True(
     groundedAugmentation.Prompt.Contains("Dokument zrodlowy CIT", StringComparison.OrdinalIgnoreCase),
-    "Published act prompt augmentation should inject OCR-derived source text before local LLM execution.",
+    "Published act prompt augmentation should inject grounded source text before local LLM execution.",
+    failures);
+Expect.True(
+    groundedAugmentation.Prompt.Contains("Wyciag tekstu ze zrodla:", StringComparison.Ordinal),
+    "Published act prompt augmentation should label the grounded excerpt as source text instead of promising OCR.",
+    failures);
+Expect.False(
+    groundedAugmentation.Prompt.Contains("Wyciag OCR:", StringComparison.Ordinal),
+    "Published act prompt augmentation should not label the plain-text extraction path as OCR.",
     failures);
 Expect.True(
     groundedCompletedTask.Citations.Contains("https://eli.gov.pl/eli/DU/2026/501/ogl", StringComparer.OrdinalIgnoreCase),
@@ -2112,6 +2133,38 @@ Expect.Equal(ApiClientAccessDecision.Authorized, durableAuthorizedAccess.Decisio
 Expect.Equal(ApiClientAccessDecision.InactiveClient, durableInactiveAccess.Decision, "File-backed API client projection should preserve inactive clients after reload.", failures);
 Expect.Equal(ApiClientAccessDecision.UnknownToken, durableStaleAccess.Decision, "File-backed API client projection should reject stale tokens after reload.", failures);
 
+var defaultSeedOptions = new SeedDataOptions();
+Expect.False(defaultSeedOptions.EnableDefaultOperatorSeed, "Default seed-data configuration should keep the development operator seed disabled until explicitly enabled.", failures);
+Expect.False(defaultSeedOptions.EnableDefaultApiClientSeed, "Default seed-data configuration should keep demo API-client seeds disabled until explicitly enabled.", failures);
+
+var disabledSeedApiClientRepository = new InMemoryApiClientRepository();
+var disabledSeedApiClientProjection = new InMemoryApiClientProjectionStore();
+var disabledSeedApiClientBootstrap = new ApiClientsBootstrapHostedService(
+    Options.Create(new SeedDataOptions
+    {
+        EnableDefaultApiClientSeed = false
+    }),
+    new ApiClientsQueryService(disabledSeedApiClientProjection),
+    new ApiClientsCommandService(disabledSeedApiClientRepository, disabledSeedApiClientProjection),
+    tokenFingerprintService);
+await disabledSeedApiClientBootstrap.StartAsync(CancellationToken.None);
+var disabledSeedApiClients = await new ApiClientsQueryService(disabledSeedApiClientProjection).GetApiClientsAsync(CancellationToken.None);
+Expect.Equal(0, disabledSeedApiClients.Count, "API-client bootstrap should not seed demo machine-to-machine tokens when the seed toggle is disabled.", failures);
+
+var enabledSeedApiClientRepository = new InMemoryApiClientRepository();
+var enabledSeedApiClientProjection = new InMemoryApiClientProjectionStore();
+var enabledSeedApiClientBootstrap = new ApiClientsBootstrapHostedService(
+    Options.Create(new SeedDataOptions
+    {
+        EnableDefaultApiClientSeed = true
+    }),
+    new ApiClientsQueryService(enabledSeedApiClientProjection),
+    new ApiClientsCommandService(enabledSeedApiClientRepository, enabledSeedApiClientProjection),
+    tokenFingerprintService);
+await enabledSeedApiClientBootstrap.StartAsync(CancellationToken.None);
+var enabledSeedApiClients = await new ApiClientsQueryService(enabledSeedApiClientProjection).GetApiClientsAsync(CancellationToken.None);
+Expect.Equal(2, enabledSeedApiClients.Count, "API-client bootstrap should seed the development/demo machine-to-machine clients only when explicitly enabled.", failures);
+
 var operatorPasswordHasher = new Pbkdf2OperatorPasswordHasher();
 var operatorRepository = new InMemoryOperatorAccountRepository();
 var operatorProjection = new InMemoryOperatorAccountProjectionStore();
@@ -2242,6 +2295,39 @@ Expect.Equal(2, durableOperators.Count, "File-backed operator projection should 
 Expect.Equal("durable.admin@lawwatcher.local", durableOperators[0].Email, "File-backed operator query should sort operators by email after reload.", failures);
 Expect.Equal(OperatorAccessDecision.Authorized, durableAuthorizedOperatorAccess.Decision, "File-backed operator projection should authorize active operators after reload.", failures);
 Expect.Equal(OperatorAuthenticationDecision.InactiveOperator, durableInactiveOperatorAuthentication.Decision, "File-backed operator projection should preserve inactive operators after reload.", failures);
+
+var disabledSeedOperatorProjection = new InMemoryOperatorAccountProjectionStore();
+var disabledSeedOperatorBootstrap = new OperatorAccountsBootstrapHostedService(
+    Options.Create(new SeedDataOptions
+    {
+        EnableDefaultOperatorSeed = false
+    }),
+    disabledSeedOperatorProjection,
+    new OperatorAccountsCommandService(
+        new InMemoryOperatorAccountRepository(),
+        disabledSeedOperatorProjection,
+        disabledSeedOperatorProjection,
+        operatorPasswordHasher));
+await disabledSeedOperatorBootstrap.StartAsync(CancellationToken.None);
+var disabledSeedOperators = await new OperatorAccountsQueryService(disabledSeedOperatorProjection).GetOperatorsAsync(CancellationToken.None);
+Expect.Equal(0, disabledSeedOperators.Count, "Operator bootstrap should not seed the development operator account when the seed toggle is disabled.", failures);
+
+var enabledSeedOperatorProjection = new InMemoryOperatorAccountProjectionStore();
+var enabledSeedOperatorBootstrap = new OperatorAccountsBootstrapHostedService(
+    Options.Create(new SeedDataOptions
+    {
+        EnableDefaultOperatorSeed = true
+    }),
+    enabledSeedOperatorProjection,
+    new OperatorAccountsCommandService(
+        new InMemoryOperatorAccountRepository(),
+        enabledSeedOperatorProjection,
+        enabledSeedOperatorProjection,
+        operatorPasswordHasher));
+await enabledSeedOperatorBootstrap.StartAsync(CancellationToken.None);
+var enabledSeedOperators = await new OperatorAccountsQueryService(enabledSeedOperatorProjection).GetOperatorsAsync(CancellationToken.None);
+Expect.Equal(1, enabledSeedOperators.Count, "Operator bootstrap should seed the development operator account only when explicitly enabled.", failures);
+Expect.Equal("admin@lawwatcher.local", enabledSeedOperators[0].Email, "Operator bootstrap should seed the configured development operator email when explicitly enabled.", failures);
 
 var adapterRoot = Path.Combine(AppContext.BaseDirectory, "spec-artifacts", Guid.NewGuid().ToString("N"));
 var documentStore = new LocalFileDocumentStore(adapterRoot);

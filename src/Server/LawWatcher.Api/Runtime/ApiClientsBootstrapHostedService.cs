@@ -1,8 +1,11 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.IdentityAndAccess.Application;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class ApiClientsBootstrapHostedService(
+    IOptions<SeedDataOptions> options,
     ApiClientsQueryService queryService,
     ApiClientsCommandService commandService,
     IApiTokenFingerprintService tokenFingerprintService) : IHostedService
@@ -12,6 +15,11 @@ public sealed class ApiClientsBootstrapHostedService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDefaultApiClientSeed)
+        {
+            return;
+        }
+
         var existingClients = await queryService.GetApiClientsAsync(cancellationToken);
         if (existingClients.Count != 0)
         {

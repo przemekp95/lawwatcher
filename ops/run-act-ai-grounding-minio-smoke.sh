@@ -60,7 +60,8 @@ write_env_file_from_example \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "OLLAMA_HOST_PORT=${ollama_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
-  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}"
+  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
 
 compose_args=(
   compose

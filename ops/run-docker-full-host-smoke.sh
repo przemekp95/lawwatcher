@@ -42,11 +42,19 @@ done
 
 cd "$repo_root"
 
+tmp_dir="$(mktemp -d)"
+env_file="${tmp_dir}/full-host.env"
+
+write_env_file_from_example \
+  "ops/env/full-host.env.example" \
+  "${env_file}" \
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
   -f ops/compose/docker-compose.full-host.yml
-  --env-file ops/env/full-host.env.example
+  --env-file "${env_file}"
   --profile full-host
 )
 
@@ -63,6 +71,7 @@ fi
 
 cleanup() {
   docker "${compose_args[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
 

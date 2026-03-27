@@ -28,6 +28,8 @@ public sealed class CapabilityOptions
 
     public bool Replay { get; init; }
 
+    public bool SqlFullText { get; init; }
+
     public bool SemanticSearch { get; init; }
 
     public bool HybridSearch { get; init; }
@@ -42,6 +44,7 @@ public sealed class LawWatcherRuntimeOptions
         Ai = true,
         Ocr = false,
         Replay = true,
+        SqlFullText = false,
         SemanticSearch = false,
         HybridSearch = false
     };
@@ -196,11 +199,11 @@ public sealed record SystemCapabilities(
 
         var searchCapabilities = runtimeProfile == RuntimeProfile.DevLaptop
             ? new SearchCapabilities(
-                UseSqlFullText: true,
+                UseSqlFullText: options.SqlFullText,
                 UseHybridSearch: false,
                 UseSemanticSearch: false)
             : new SearchCapabilities(
-                UseSqlFullText: true,
+                UseSqlFullText: options.SqlFullText,
                 UseHybridSearch: options.HybridSearch,
                 UseSemanticSearch: options.SemanticSearch);
 

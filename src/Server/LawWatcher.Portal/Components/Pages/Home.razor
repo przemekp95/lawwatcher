@@ -42,7 +42,7 @@
             <span class="status-pill">@_state.RuntimeProfile</span>
             <span class="status-pill">AI @_state.Capabilities.Ai.ActivationMode</span>
             <span class="status-pill">Search @GetSearchBackendLabel(_state)</span>
-            <span class="status-pill">@(_state.Capabilities.OcrEnabled ? "OCR enabled" : "OCR on demand")</span>
+            <span class="status-pill">@(_state.Capabilities.OcrEnabled ? "OCR enabled" : "Plain-text extraction only")</span>
             <span class="status-pill">@(_state.Capabilities.ReplayEnabled ? "Replay enabled" : "Replay disabled")</span>
         </section>
 
@@ -274,5 +274,10 @@
         timestamp.ToLocalTime().ToString("dd MMM yyyy HH:mm");
 
     private static string GetSearchBackendLabel(PortalDashboardData state) =>
-        state.Capabilities.Search.Backend == SearchBackend.HybridVector ? "hybrid" : "sql-fts";
+        state.Capabilities.Search.Backend switch
+        {
+            SearchBackend.HybridVector => "hybrid",
+            SearchBackend.SqlFullText => "sql-fts",
+            _ => "projection index"
+        };
 }

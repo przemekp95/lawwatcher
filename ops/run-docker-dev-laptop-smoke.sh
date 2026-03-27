@@ -37,10 +37,18 @@ done
 
 cd "$repo_root"
 
+tmp_dir="$(mktemp -d)"
+env_file="${tmp_dir}/dev-laptop.env"
+
+write_env_file_from_example \
+  "ops/env/dev-laptop.env.example" \
+  "${env_file}" \
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  --env-file ops/env/dev-laptop.env.example
+  --env-file "${env_file}"
 )
 
 if [[ "$build_local" == "true" ]]; then
@@ -53,6 +61,7 @@ fi
 
 cleanup() {
   docker "${compose_args[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
 

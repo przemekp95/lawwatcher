@@ -1025,9 +1025,9 @@
 
     private sealed class LoginInput
     {
-        public string Email { get; set; } = "admin@lawwatcher.local";
+        public string Email { get; set; } = string.Empty;
 
-        public string Password { get; set; } = "Admin123!";
+        public string Password { get; set; } = string.Empty;
     }
 
     private sealed class OperatorCreateInput

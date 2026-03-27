@@ -62,7 +62,8 @@ write_env_file_from_example \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "WORKERS__LITE__MAXCONCURRENCY=1" \
-  "WORKERS__AI__MAXCONCURRENCY=1"
+  "WORKERS__AI__MAXCONCURRENCY=1" \
+  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
 
 compose_args=(
   compose

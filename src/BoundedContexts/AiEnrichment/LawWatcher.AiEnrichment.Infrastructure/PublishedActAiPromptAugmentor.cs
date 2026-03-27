@@ -58,7 +58,7 @@ public sealed class PublishedActAiPromptAugmentor(
                 .AppendLine("Material z dokumentu zrodlowego:")
                 .Append("- ELI: ").AppendLine(act.Eli.Value)
                 .Append("- Artefakt: ").AppendLine(LegalCorpusArtifactStorage.CreateCitation(artifact.ObjectKey))
-                .AppendLine("Wyciag OCR:")
+                .AppendLine("Wyciag tekstu ze zrodla:")
                 .Append(excerpt)
                 .ToString();
 

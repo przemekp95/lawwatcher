@@ -2,6 +2,7 @@ services:
   api:
     environment:
       LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}
       LawWatcher__Runtime__Capabilities__HybridSearch: ${ENABLE_OPENSEARCH}
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
@@ -70,6 +71,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       LawWatcher__Storage__Provider: sqlserver
       LawWatcher__Health__Urls: http://+:8080
       LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}

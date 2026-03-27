@@ -63,7 +63,7 @@ services:
       STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
       STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
-      SEARCH__BACKEND: ${SEARCH__BACKEND}
+      LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
       Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
       AI__MODE: ${AI__MODE}
@@ -71,6 +71,8 @@ services:
       AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
       LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
       LawWatcher__SeedData__EnableWebhookSubscriptionSeed: ${LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED:-true}
+      LawWatcher__SeedData__EnableDefaultOperatorSeed: ${LAWWATCHER__SEEDDATA__ENABLEDEFAULTOPERATORSEED:-false}
+      LawWatcher__SeedData__EnableDefaultApiClientSeed: ${LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED:-false}
       LawWatcher__Webhooks__Backend: ${LAWWATCHER__WEBHOOKS__BACKEND:-}
       LawWatcher__Webhooks__SigningSecret: ${LAWWATCHER__WEBHOOKS__SIGNINGSECRET:-}
     ports:
@@ -109,7 +111,7 @@ services:
       STORAGE__MINIO__ENDPOINT: ${STORAGE__MINIO__ENDPOINT}
       STORAGE__MINIO__ACCESSKEY: ${STORAGE__MINIO__ACCESSKEY}
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
-      SEARCH__BACKEND: ${SEARCH__BACKEND}
+      LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       Search__OpenSearch__BaseUrl: ${SEARCH__OPENSEARCH__BASEURL}
       Search__OpenSearch__IndexName: ${SEARCH__OPENSEARCH__INDEXNAME}
       AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}

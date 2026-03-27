@@ -28,6 +28,8 @@ bash ops/stop-docker-dev-laptop.sh
 bash ops/stop-docker-full-host.sh
 ```
 
+The checked-in Docker env examples keep the demo operator account and demo API-client seeds disabled by default. Only the smoke scripts opt into those demo seeds explicitly when they need local browser or bearer auth proofs.
+
 ## First Response
 
 When a runtime looks broken, do not start with retention cleanup or manual SQL deletes. Start with these checks in order.
