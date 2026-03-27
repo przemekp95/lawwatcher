@@ -69,7 +69,7 @@ trap cleanup EXIT
 if [[ "$build_local" == "true" ]]; then
   docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
 else
-  docker "${compose_args[@]}" pull >/dev/null
+  pull_compose_images_or_use_local "${compose_args[@]}"
   docker "${compose_args[@]}" up -d --remove-orphans >/dev/null
 fi
 

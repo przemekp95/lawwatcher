@@ -5,7 +5,17 @@ on:
   pull_request:
 
 jobs:
+  docker_contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Docker-first contract
+        run: bash ops/verify-docker-contract.sh
+
   dev_laptop_linux:
+    needs: docker_contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,8 +27,19 @@ jobs:
       - name: AI smoke
         run: bash ops/run-docker-dev-laptop-smoke.sh --build-local --include-ai
 
+  host_health_linux:
+    needs: docker_contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Host health smoke
+        run: bash ops/run-host-health-smoke.sh --build-local
+
   full_host_linux:
     if: github.event_name == 'workflow_dispatch'
+    needs: docker_contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

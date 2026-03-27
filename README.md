@@ -13,7 +13,16 @@ LawWatcher is an on-prem, single-tenant modular monolith for legislative monitor
 
 Operational recovery and incident procedures are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
-Container start is image-first. Raw `docker compose pull` and `docker compose up -d` should consume prebuilt Linux images from `GHCR`. Linux shell wrappers under `ops/*.sh` exist only as convenience helpers around the same Docker/image-first contract.
+Container start is image-first. Raw `docker compose pull` and `docker compose up -d` are the primary runtime contract on every host OS. They consume the same prebuilt Linux images from `GHCR`, and the checked-in `ops/*.sh` wrappers are only thin convenience helpers around that same Docker contract.
+
+Runtime prerequisites for the supported Docker-first path:
+
+- `docker` with the Compose plugin on `PATH`
+- `bash`
+- `curl`
+- `node` plus `npm` or `npx` for browser and smoke tooling
+
+The repo intentionally does not contain host-specific `PowerShell`, `Git Bash` path probing or Windows-only bootstrap logic in the supported runtime path. If `docker` is not on `PATH`, fix the host environment instead of relying on repo-local shell hacks.
 
 The checked-in `ops/env/*.env.example` files now default to `ghcr.io/przemekp95/lawwatcher-*:<tag>`, which matches the public GitHub remote `https://github.com/przemekp95/lawwatcher`. If you run a fork or another org, override `LAWWATCHER_*_IMAGE` to your own `GHCR` owner.
 
@@ -137,35 +146,35 @@ bash ops/run-docker-full-host-smoke.sh --build-local --include-opensearch
 
 Browser-level verification against the local portal:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/verify-browser-dev.ps1
+```bash
+bash ops/verify-browser-dev.sh
 ```
 
 Backend operator auth and admin CRUD smoke:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-operator-admin-smoke.ps1
+```bash
+bash ops/run-operator-admin-smoke.sh
 ```
 
 Browser operator auth and admin CRUD smoke:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-operator-admin-browser-smoke.ps1
+```bash
+bash ops/run-operator-admin-browser-smoke.sh
 ```
 
 Host liveness/readiness smoke:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-host-health-smoke.ps1
+```bash
+bash ops/run-host-health-smoke.sh
 ```
 
 MinIO-backed act AI grounding smoke:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-act-ai-grounding-minio-smoke.ps1
+```bash
+bash ops/run-act-ai-grounding-minio-smoke.sh
 ```
 
-Windows-only local host processes, LocalDB bootstrap and App Control workarounds are no longer part of the supported runtime contract.
+Legacy host-process wrappers, non-container SQL bootstrap and App Control workarounds are no longer part of the supported runtime contract.
 
 ## Operational Notes
 
@@ -223,21 +232,21 @@ Windows-only local host processes, LocalDB bootstrap and App Control workarounds
 - `POST /v1/profiles`, `POST /v1/profiles/{id}/rules`, `PATCH /v1/profiles/{id}/alert-policy` and `DELETE /v1/profiles/{id}` now expose backend admin commands for monitoring profiles and accept either operator cookie auth with antiforgery or bearer scope `profiles:write`.
 - `POST /v1/subscriptions`, `PATCH /v1/subscriptions/{id}/alert-policy` and `DELETE /v1/subscriptions/{id}` now expose backend admin commands for profile subscriptions and accept either operator cookie auth with antiforgery or bearer scope `subscriptions:write`.
 - `POST /v1/ai/tasks` requires bearer scope `ai:write` and queues a local AI enrichment task for eventual background execution.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-act-ai-grounding-smoke.ps1` starts an isolated `API + Worker.Ai` stack and verifies that an `act` task is grounded through stored source artifacts, OCR and local LLM citations.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-act-ai-grounding-minio-smoke.ps1` starts an isolated `API + Worker.Ai` stack with `Storage:Minio:*` pointed at a real local `MinIO` instance, verifies that `act` seed artifacts are written and read through the S3-compatible document-store backend, and fails if the local filesystem fallback is used instead of `MinIO`.
-- The old LocalDB-backed fine-grained broker smoke lane and `SqlServerSpecs` harness were removed from the supported runtime contract because they were Windows-only. Supported messaging proof is now the Linux/container-first Docker profile smokes plus runtime diagnostics such as `GET /v1/system/messaging`.
+- `bash ops/run-act-ai-grounding-smoke.sh` starts an isolated `API + Worker.Ai` stack and verifies that an `act` task is grounded through stored source artifacts, OCR and local LLM citations.
+- `bash ops/run-act-ai-grounding-minio-smoke.sh` starts an isolated `API + Worker.Ai` stack with `Storage:Minio:*` pointed at a real local `MinIO` instance, verifies that `act` seed artifacts are written and read through the S3-compatible document-store backend, and fails if the local filesystem fallback is used instead of `MinIO`.
+- The old fine-grained non-container broker smoke lane and `SqlServerSpecs` harness were removed from the supported runtime contract. Supported messaging proof is now the Docker profile smokes plus runtime diagnostics such as `GET /v1/system/messaging`.
 - `POST /v1/webhooks` accepts either operator cookie auth with antiforgery or bearer scope `webhooks:write`, and registers an active integration webhook.
 - `PATCH /v1/webhooks/{id}` accepts either operator cookie auth with antiforgery or bearer scope `webhooks:write`, and updates the webhook name, callback URL and subscribed event types.
 - `DELETE /v1/webhooks/{id}` accepts either operator cookie auth with antiforgery or bearer scope `webhooks:write`, and deactivates an integration webhook.
 - `PATCH /v1/api-clients/{id}` accepts either operator cookie auth with antiforgery or bearer scope `api-clients:write`, and updates the API client name, scopes and optional secret rotation token.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-signed-webhook-smoke.ps1` starts an isolated `API + Worker.Lite` stack, disables the seeded notification webhook subscription, registers a local `alert.created` integration webhook and verifies signed HTTP delivery end-to-end.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-host-health-smoke.ps1` starts an isolated `API + Worker.Lite + Worker.Ai` stack, verifies `GET /health/live` and `GET /health/ready` across all three hosts, and writes `output/health/host-health-summary.json`.
+- `bash ops/run-signed-webhook-smoke.sh` starts an isolated `API + Worker.Lite` stack, disables the seeded notification webhook subscription, registers a local `alert.created` integration webhook and verifies signed HTTP delivery end-to-end.
+- `bash ops/run-host-health-smoke.sh` starts an isolated `API + Worker.Lite + Worker.Ai` stack, verifies `GET /health/live` and `GET /health/ready` across all three hosts, and writes `output/health/host-health-summary.json`.
 - `POST /v1/replays` requires bearer scope `replays:write` and is completed asynchronously by `worker-lite`.
 - `POST /v1/backfills` requires bearer scope `backfills:write` and is completed asynchronously by `worker-lite`.
 - The seeded local demo token for those write paths is `portal-integrator-demo-token`.
 - The seeded local demo token now also carries `profiles:write`, `subscriptions:write` and `api-clients:write` so the backend admin endpoints can be exercised locally without editing seed data.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-operator-admin-smoke.ps1` starts an isolated API instance, verifies `401` for anonymous operator reads, `400` for missing CSRF on login and profile writes, `200` login + `GET /v1/operator/me`, then exercises operator/profile/subscription/webhook/API-client CRUD including deactivation plus API client secret rotation and bearer proof for the rotated token.
-- `powershell -ExecutionPolicy Bypass -File .\ops\run-operator-admin-browser-smoke.ps1` starts isolated API and portal hosts on random localhost ports, signs into `/admin` through the real operator cookie flow, exercises browser CRUD for operators, profiles, subscriptions, webhooks and API clients, captures authenticated and logged-out screenshots into `output/playwright`, and fails if any admin browser step or artifact is missing.
+- `bash ops/run-operator-admin-smoke.sh` starts an isolated API instance, verifies `401` for anonymous operator reads, `400` for missing CSRF on login and profile writes, `200` login + `GET /v1/operator/me`, then exercises operator/profile/subscription/webhook/API-client CRUD including deactivation plus API client secret rotation and bearer proof for the rotated token.
+- `bash ops/run-operator-admin-browser-smoke.sh` starts isolated API and portal hosts on random localhost ports, signs into `/admin` through the real operator cookie flow, exercises browser CRUD for operators, profiles, subscriptions, webhooks and API clients, captures authenticated and logged-out screenshots into `output/playwright`, and fails if any admin browser step or artifact is missing.
 - `POST /v1/ai/tasks`, `POST /v1/replays` and `POST /v1/backfills` remain machine-to-machine JSON endpoints. They do not use browser cookies or sessions, so CSRF protections are not the applicable control for them.
 - `POST /v1/ai/tasks` is executed asynchronously by `worker-ai`.
 - `POST /v1/replays` and `POST /v1/backfills` are executed asynchronously by `worker-lite`.
@@ -272,7 +281,7 @@ Windows-only local host processes, LocalDB bootstrap and App Control workarounds
 - The activity page surfaces `alerts` and the operational `event feed`.
 - The admin page establishes an operator session against `LawWatcher.Api`, then uses the same scoped API cookie jar plus `X-LawWatcher-CSRF` for operator, profile, subscription, webhook and API client commands inside the Blazor Server circuit.
 - Portal API reads are configured through `LawWatcher:PortalApi:BaseUrl`, which defaults to `http://127.0.0.1:5290` for local development.
-- The `ops/run-*-dev.ps1` host scripts now prefer the fresher artifact between the local single-file publish output and the current Debug build output, so stale publish artifacts no longer silently shadow newer code changes.
-- `ops/verify-browser-dev.ps1` captures Chromium screenshots for `/`, `/search?q=VAT`, `/activity` and `/admin` into `output/playwright`, and writes a `browser-summary.json` with the verification metadata, including the browser admin entrypoint.
-- `ops/run-operator-admin-browser-smoke.ps1` is the stronger authenticated browser proof for `/admin`: it verifies `login -> CRUD -> deactivate -> logout` through the live Blazor Server UI and writes `operator-admin-browser-summary.json`, `admin-authenticated.png` and `admin-logged-out.png` under `output/playwright`.
-- The removed LocalDB-backed `SqlServerSpecs` lane is no longer part of the repo. Supported SQL verification now comes from the Docker `dev-laptop` and `full-host` runtime smokes on real `sqlserver` containers.
+- The supported runtime wrappers are now Docker-first shell scripts under `ops/*.sh`; the old Windows-only local host-process wrappers are no longer part of the supported contract.
+- `ops/verify-browser-dev.sh` captures Chromium screenshots for `/`, `/search?q=VAT`, `/activity` and `/admin` into `output/playwright`, and writes a `browser-summary.json` with the verification metadata, including the browser admin entrypoint.
+- `ops/run-operator-admin-browser-smoke.sh` is the stronger authenticated browser proof for `/admin`: it verifies `login -> CRUD -> deactivate -> logout` through the live Blazor Server UI and writes `operator-admin-browser-summary.json`, `admin-authenticated.png` and `admin-logged-out.png` under `output/playwright`.
+- The removed non-container `SqlServerSpecs` lane is no longer part of the repo. Supported SQL verification now comes from the Docker `dev-laptop` and `full-host` runtime smokes on real `sqlserver` containers.

@@ -78,7 +78,7 @@ if [[ "$build_local" == "true" ]]; then
 fi
 
 if [[ "$build_local" != "true" ]]; then
-  docker "${compose_args[@]}" pull
+  pull_compose_images_or_use_local "${compose_args[@]}"
 fi
 
 if [[ "$include_opensearch" == "true" ]]; then

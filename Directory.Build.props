@@ -4,11 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <LawWatcherArtifactsRoot Condition="'$(LawWatcherArtifactsRoot)' == '' and '$(UserProfile)' != ''">$([System.IO.Path]::Combine('$(UserProfile)', 'AppData', 'Local', 'LawWatcher', 'artifacts'))\</LawWatcherArtifactsRoot>
-    <LawWatcherArtifactsRoot Condition="'$(LawWatcherArtifactsRoot)' == '' and '$(HOME)' != ''">$([System.IO.Path]::Combine('$(HOME)', '.lawwatcher', 'artifacts'))/</LawWatcherArtifactsRoot>
+    <LawWatcherArtifactsRoot Condition="'$(LawWatcherArtifactsRoot)' == ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '.artifacts', 'msbuild'))</LawWatcherArtifactsRoot>
     <LawWatcherArtifactsRootNormalized>$([MSBuild]::EnsureTrailingSlash('$(LawWatcherArtifactsRoot)'))</LawWatcherArtifactsRootNormalized>
-    <BaseIntermediateOutputPath>$(LawWatcherArtifactsRootNormalized)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
-    <BaseOutputPath>$(LawWatcherArtifactsRootNormalized)bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(LawWatcherArtifactsRootNormalized)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(LawWatcherArtifactsRootNormalized)bin/$(MSBuildProjectName)/</BaseOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

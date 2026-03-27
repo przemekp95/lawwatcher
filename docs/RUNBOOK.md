@@ -2,6 +2,8 @@
 
 This runbook covers first response, runtime recovery and safe state or projection recovery for the supported LawWatcher profiles.
 
+The supported operational contract is Docker-first and host-OS-neutral: raw `docker compose` is the source of truth, and the checked-in `ops/*.sh` wrappers are only a thin POSIX shell layer over the same compose profiles.
+
 ## Supported Runtime Profiles
 
 - `dev-laptop`: `sqlserver`, `rabbitmq`, `minio`, `api`, `portal`, `worker-lite`
@@ -31,8 +33,8 @@ When a runtime looks broken, do not start with retention cleanup or manual SQL d
 
 ### 1. Check host health
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-host-health-smoke.ps1
+```bash
+bash ops/run-host-health-smoke.sh
 ```
 
 Expected:
@@ -80,9 +82,9 @@ Before making changes, try the smallest supported smoke for the affected runtime
 - Docker runtime with AI: `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
 - full-host runtime: `bash ops/run-docker-full-host-smoke.sh`
 - full-host with OpenSearch: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
-- MinIO-backed AI grounding: `ops/run-act-ai-grounding-minio-smoke.ps1`
-- operator auth and admin CRUD: `ops/run-operator-admin-smoke.ps1`
-- browser admin CRUD: `ops/run-operator-admin-browser-smoke.ps1`
+- MinIO-backed AI grounding: `ops/run-act-ai-grounding-minio-smoke.sh`
+- operator auth and admin CRUD: `ops/run-operator-admin-smoke.sh`
+- browser admin CRUD: `ops/run-operator-admin-browser-smoke.sh`
 
 ## Common Incident Playbooks
 
@@ -97,7 +99,7 @@ Actions:
 
 1. Check whether the failing dependency is `sqlserver`, `rabbitmq`, `ollama` or `opensearch`.
 2. Restart only the affected dependency first.
-3. Re-run `ops/run-host-health-smoke.ps1`.
+3. Re-run `ops/run-host-health-smoke.sh`.
 4. If readiness is still red, inspect logs and matching smoke summaries under `output`.
 
 Do not start retention cleanup for a readiness failure.
@@ -162,7 +164,7 @@ Symptoms:
 
 Actions:
 
-1. Run `ops/run-host-health-smoke.ps1` and confirm `worker-ai` readiness.
+1. Run `ops/run-host-health-smoke.sh` and confirm `worker-ai` readiness.
 2. Verify the container model:
 
 ```bash
@@ -172,7 +174,7 @@ bash ops/ensure-docker-ollama-model.sh llama3.2:1b
 3. Re-run the smallest relevant proof:
 
 - `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
-- `ops/run-act-ai-grounding-minio-smoke.ps1`
+- `ops/run-act-ai-grounding-minio-smoke.sh`
 
 If the MinIO grounding smoke is green but a user task is wrong, treat it as content or prompt quality investigation, not storage-path recovery.
 
@@ -188,14 +190,14 @@ Actions:
 
 1. Run backend admin proof first:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-operator-admin-smoke.ps1
+```bash
+bash ops/run-operator-admin-smoke.sh
 ```
 
 2. Then run browser proof:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File ops/run-operator-admin-browser-smoke.ps1
+```bash
+bash ops/run-operator-admin-browser-smoke.sh
 ```
 
 3. Inspect:
@@ -265,7 +267,7 @@ When the issue is broker-related, include:
 - do not manually delete `outbox`, `inbox`, `event_feed` or `search_documents` rows as a first response
 - do not run retention before collecting diagnostics
 - do not claim broker failure without checking `GET /v1/system/messaging`
-- do not treat browser admin failures as backend auth failures until `ops/run-operator-admin-smoke.ps1` is checked
+- do not treat browser admin failures as backend auth failures until `ops/run-operator-admin-smoke.sh` is checked
 - do not treat AI grounding failures as RabbitMQ failures until `worker-ai` readiness and MinIO grounding smoke are checked
 
 ## Recovery Exit Criteria

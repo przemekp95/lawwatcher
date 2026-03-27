@@ -31,7 +31,7 @@ Mozna uczciwie powiedziec:
 - lokalny LLM jest project-managed przez `ollama`, z bootstrapem i pinned modelem
 - sporo read/write slice'ow ma juz SQL-backed runtime
 - broker-ready `RabbitMQ + MassTransit` jest juz zaimplementowane dla glownych flow i ma swieze dowody wykonaniowe w wspieranych profilach Docker
-- dawny windows-only lane `LocalDB + portable RabbitMQ + PowerShell broker smoke` zostal usuniety z repo, zeby nie utrzymywac niewspieranego kontraktu uruchomieniowego
+- dawny niekontenerowy lane `SQL bootstrap + portable broker smoke` zostal usuniety z repo, zeby nie utrzymywac niewspieranego kontraktu uruchomieniowego
 - `MinIO` ma juz swiezy end-to-end green dla `act` AI grounding na realnym backendzie S3-compatible, bez uzycia filesystem fallback
 - `docker` dev-laptop runtime jest juz realny dla `sqlserver + rabbitmq + minio + api + portal + worker-lite`, a profil `ai` ma swiezy green z dockerowym `ollama`
 - `docker` full-host runtime jest juz realny i ma swiezy green dla `api + portal + worker-projection + worker-notifications + worker-replay + worker-documents + sqlserver + rabbitmq + minio + ollama`
@@ -84,7 +84,7 @@ Pozostalo:
 - [ ] Uporzadkowac stance runtime: SQL poller jako jawny fallback/recovery, a nie rownorzedna normalna sciezka.
 - [ ] Odtworzyc wspierany, kontenerowy proof, ze write path nie czeka na AI/OCR/search/dispatch po stronie broker mode.
   Status:
-  dawny proof byl oparty o usuniety windows-only lane `LocalDB + PowerShell`; po czyszczeniu kontraktu trzeba go odtworzyc jako Linux/Docker-first smoke.
+  dawny proof byl oparty o usuniety niekontenerowy lane; po czyszczeniu kontraktu trzeba go odtworzyc jako Docker-first smoke.
 
 Exit criteria:
 
@@ -177,7 +177,7 @@ Pozostalo:
 - [ ] Uporzadkowac role seed data tak, zeby byly tylko development/demo aid, a nie cicha proteza brakujacego flow.
 - [x] Utrzymac i dokumentowac rozdzial browser auth versus M2M auth jako finalny kontrakt produktu.
   Status:
-  [README.md](README.md) jawnie opisuje juz finalny kontrakt: browser admin flow idzie przez operator `cookie + antiforgery`, a `ai/replays/backfills` i pozostale M2M write pathy pozostaja bearer-only bez cookies i bez browser session. Swiezy proof istnieje zarowno po stronie backendu przez `ops/run-operator-admin-smoke.ps1`, jak i po stronie przegladarki przez `ops/run-operator-admin-browser-smoke.ps1`.
+  [README.md](README.md) jawnie opisuje juz finalny kontrakt: browser admin flow idzie przez operator `cookie + antiforgery`, a `ai/replays/backfills` i pozostale M2M write pathy pozostaja bearer-only bez cookies i bez browser session. Swiezy proof istnieje zarowno po stronie backendu przez `ops/run-operator-admin-smoke.sh`, jak i po stronie przegladarki przez `ops/run-operator-admin-browser-smoke.sh`.
 
 Exit criteria:
 
@@ -222,13 +222,16 @@ Pozostalo:
   `GET /v1/system/messaging` istnieje juz jako admin/system diagnostics endpoint i daje swiezy runtime snapshot `outbox/inbox`, grouped per `message_type` oraz `consumer_name`, z truthful `deliveryMode/pollerMode`. Swiezy green jest juz dowiedziony w wspieranych profilach Docker.
 - [x] Dodac cleanup/retention dla `published outbox`, `processed inbox` i `event_feed`.
   Status:
-  `POST /v1/system/maintenance/retention` istnieje juz jako admin-only endpoint dla SQL runtime i ma swiezy green przez `ops/run-retention-maintenance-smoke.ps1`, z realnym usunieciem starych rowow i zachowaniem nowych.
+  `POST /v1/system/maintenance/retention` istnieje juz jako admin-only endpoint dla SQL runtime i obejmuje `published outbox`, `processed inbox` oraz `event_feed`.
 - [x] Podjac i dowiezc bezpieczna semantyke cleanup/retention dla `search_documents`.
   Status:
-  `search_documents` maja juz jawnie opt-in cleanup przez `searchDocumentsRetentionHours` na `POST /v1/system/maintenance/retention`, oparty o `indexed_at_utc` zamiast ukrytego TTL. `ops/run-retention-maintenance-smoke.ps1` jest juz swiezo zielony i potwierdza usuniecie starych rowow oraz zachowanie nowych.
-- [ ] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu windows-only broker smoke lane.
+  `search_documents` maja juz jawnie opt-in cleanup przez `searchDocumentsRetentionHours` na `POST /v1/system/maintenance/retention`, oparty o `indexed_at_utc` zamiast ukrytego TTL.
+- [ ] Odtworzyc Linux/Docker-first proof dla retention cleanup po usunieciu dawnego dedykowanego harnessu.
   Status:
-  structured log templates w kodzie nadal istnieja, ale dawny asercyjny proof opieral sie o usuniete PowerShell broker smoke'i i musi zostac odtworzony w wspieranym kontrakcie kontenerowym.
+  funkcjonalnosc retention istnieje w API/runtime, ale dedykowany shellowy smoke dla tego endpointu nie zostal jeszcze odtworzony po czyszczeniu starego lane.
+- [ ] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu dawnego broker smoke lane.
+  Status:
+  structured log templates w kodzie nadal istnieja, ale dawny asercyjny proof opieral sie o usuniete broker smoke'i i musi zostac odtworzony w wspieranym kontrakcie kontenerowym.
 - [x] Dodac runbook dla awarii runtime i odtwarzania state/projection.
   Status:
   [docs/RUNBOOK.md](docs/RUNBOOK.md) istnieje juz jako operacyjny runbook dla `dev-laptop`, `ai`, `full-host` i `opensearch`, obejmuje first-response checks, health, Docker/RabbitMQ recovery, `/v1/system/messaging`, retention, broker smoke map, browser admin recovery i zasady bezpiecznego odtwarzania state/projection bez recznego kasowania `outbox/inbox`.
@@ -270,7 +273,7 @@ Pozostalo:
   `ops/run-docker-full-host-smoke.sh` jest juz swiezo zielony na realnym Docker runtime z `api + portal + worker-projection + worker-notifications + worker-replay + worker-documents + sqlserver + rabbitmq + minio + ollama`.
 - [x] Miec swiezy AI grounding smoke na docelowym object store backendzie, jesli finalnie to `MinIO` ma byc deklarowanym defaultem dla tego flow.
   Status:
-  `ops/run-act-ai-grounding-minio-smoke.ps1` jest juz swiezo zielony na realnym `MinIO + Ollama`, ale nadal warto odtworzyc rownowazny shell/container proof, jesli ten smoke ma zostac elementem finalnego Linux-first kontraktu.
+  `ops/run-act-ai-grounding-minio-smoke.sh` jest juz swiezo zielony na realnym `MinIO + Ollama`.
 - [ ] Miec swiezy search smoke dla hosta z prawdziwym `SqlFullText`.
 - [x] Miec swiezy smoke dla `OpenSearch/HybridVector`, jesli ten profil ma byc deklarowany jako wspierany.
   Status:

@@ -270,86 +270,97 @@ var resolvedStateRoot = StateStoragePathResolver.ResolveRoot(
     {
         StateRoot = Path.Combine("..", "..", "..", "artifacts", "state")
     },
-    @"C:\repos\LawWatcher\src\Server\LawWatcher.Api");
+    Path.Combine(
+        Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? Path.DirectorySeparatorChar.ToString(),
+        "repos",
+        "LawWatcher",
+        "src",
+        "Server",
+        "LawWatcher.Api"));
 var statePaths = LawWatcherStatePaths.ForRoot(resolvedStateRoot);
+var expectedRepositoryRoot = Path.Combine(
+    Path.GetPathRoot(Directory.GetCurrentDirectory()) ?? Path.DirectorySeparatorChar.ToString(),
+    "repos",
+    "LawWatcher");
+var expectedStateRoot = Path.GetFullPath(Path.Combine(expectedRepositoryRoot, "artifacts", "state"));
 
 Expect.Equal(
-    Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"),
+    expectedStateRoot,
     resolvedStateRoot,
     "State storage path resolver should normalize the shared root relative to the host content root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "ai-enrichment", "tasks"),
+    Path.Combine(expectedStateRoot, "ai-enrichment", "tasks"),
     statePaths.AiTasksRoot,
     "State storage paths should derive a stable AI task root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "integration-api", "replays"),
+    Path.Combine(expectedStateRoot, "integration-api", "replays"),
     statePaths.ReplaysRoot,
     "State storage paths should derive a stable replay root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "integration-api", "backfills"),
+    Path.Combine(expectedStateRoot, "integration-api", "backfills"),
     statePaths.BackfillsRoot,
     "State storage paths should derive a stable backfill root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "taxonomy-and-profiles", "subscriptions"),
+    Path.Combine(expectedStateRoot, "taxonomy-and-profiles", "subscriptions"),
     statePaths.ProfileSubscriptionsRoot,
     "State storage paths should derive a stable subscription root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "integration-api", "webhook-registrations"),
+    Path.Combine(expectedStateRoot, "integration-api", "webhook-registrations"),
     statePaths.WebhookRegistrationsRoot,
     "State storage paths should derive a stable webhook registration root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "notifications", "bill-alerts"),
+    Path.Combine(expectedStateRoot, "notifications", "bill-alerts"),
     statePaths.BillAlertsRoot,
     "State storage paths should derive a stable bill alert root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "notifications", "dispatches"),
+    Path.Combine(expectedStateRoot, "notifications", "dispatches"),
     statePaths.NotificationDispatchesRoot,
     "State storage paths should derive a stable notification dispatch root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "integration-api", "webhook-dispatches"),
+    Path.Combine(expectedStateRoot, "integration-api", "webhook-dispatches"),
     statePaths.WebhookEventDispatchesRoot,
     "State storage paths should derive a stable webhook event dispatch root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "taxonomy-and-profiles", "monitoring-profiles"),
+    Path.Combine(expectedStateRoot, "taxonomy-and-profiles", "monitoring-profiles"),
     statePaths.MonitoringProfilesRoot,
     "State storage paths should derive a stable monitoring profile root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "legislative-intake", "bills"),
+    Path.Combine(expectedStateRoot, "legislative-intake", "bills"),
     statePaths.BillsRoot,
     "State storage paths should derive a stable imported bill root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "legislative-process", "processes"),
+    Path.Combine(expectedStateRoot, "legislative-process", "processes"),
     statePaths.ProcessesRoot,
     "State storage paths should derive a stable legislative process root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "legal-corpus", "acts"),
+    Path.Combine(expectedStateRoot, "legal-corpus", "acts"),
     statePaths.ActsRoot,
     "State storage paths should derive a stable published act root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "identity-and-access", "api-clients"),
+    Path.Combine(expectedStateRoot, "identity-and-access", "api-clients"),
     statePaths.ApiClientsRoot,
     "State storage paths should derive a stable API client root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "identity-and-access", "operator-accounts"),
+    Path.Combine(expectedStateRoot, "identity-and-access", "operator-accounts"),
     statePaths.OperatorAccountsRoot,
     "State storage paths should derive a stable operator account root from the shared state root.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "search", "documents"),
+    Path.Combine(expectedStateRoot, "search", "documents"),
     statePaths.SearchIndexRoot,
     "State storage paths should derive a stable search index root from the shared state root.",
     failures);
@@ -370,8 +381,10 @@ Expect.Equal(
     "Document store runtime resolver should choose the S3-compatible backend when MinIO credentials are configured.",
     failures);
 Expect.Equal(
-    Path.GetFullPath(@"C:\repos\LawWatcher\src\artifacts\documents"),
-    DocumentStoreRuntimeResolver.ResolveLocalDocumentsRoot(objectStorageOptions, @"C:\repos\LawWatcher\src\Server\LawWatcher.Api"),
+    Path.GetFullPath(Path.Combine(expectedRepositoryRoot, "src", "artifacts", "documents")),
+    DocumentStoreRuntimeResolver.ResolveLocalDocumentsRoot(
+        objectStorageOptions,
+        Path.Combine(expectedRepositoryRoot, "src", "Server", "LawWatcher.Api")),
     "Document store runtime resolver should normalize the local fallback root relative to the host content root.",
     failures);
 Expect.False(
@@ -384,7 +397,7 @@ Expect.False(
     "S3-compatible document store options should remain disabled until endpoint, access key and secret key are all present.",
     failures);
 Expect.Equal(
-    Path.Combine(Path.GetFullPath(@"C:\repos\LawWatcher\artifacts\state"), "integration-api", "events"),
+    Path.Combine(expectedStateRoot, "integration-api", "events"),
     statePaths.EventFeedRoot,
     "State storage paths should derive a stable event feed root from the shared state root.",
     failures);
