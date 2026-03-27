@@ -26,6 +26,8 @@ The repo intentionally does not contain host-specific `PowerShell`, `Git Bash` p
 
 The checked-in `ops/env/*.env.example` files now default to `ghcr.io/przemekp95/lawwatcher-*:<tag>`, which matches the public GitHub remote `https://github.com/przemekp95/lawwatcher`. If you run a fork or another org, override `LAWWATCHER_*_IMAGE` to your own `GHCR` owner.
 
+`publish-images.yml` is optimized for iteration speed: pushes to `main` and `master` publish `linux/amd64` images, while release tags `v*` publish the slower multi-arch `linux/amd64,linux/arm64` variants.
+
 Laptop-first baseline through raw compose and prebuilt images:
 
 ```bash
