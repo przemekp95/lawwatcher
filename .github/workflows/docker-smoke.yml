@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   pull_request:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   docker_contract:
     runs-on: ubuntu-latest
@@ -61,6 +64,9 @@ jobs:
 
       - name: Retention smoke
         run: bash ops/run-retention-smoke.sh --build-local
+
+      - name: Signed webhook smoke
+        run: bash ops/run-signed-webhook-smoke.sh --build-local
 
       - name: Structured-log proof
         run: bash ops/run-structured-log-proof.sh --build-local

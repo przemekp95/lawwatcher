@@ -4,6 +4,8 @@ using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.BuildingBlocks.Health;
 using LawWatcher.BuildingBlocks.Messaging;
 using LawWatcher.BuildingBlocks.Ports;
+using LawWatcher.LegalCorpus.Application;
+using LawWatcher.LegalCorpus.Infrastructure;
 using MassTransit;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -76,8 +78,13 @@ public static class WorkerDocumentsHostApplication
             });
         });
 
+        builder.Services.AddSingleton<IEventStore>(_ => new SqlServerEventStore(requiredSqlServerConnectionString));
         builder.Services.AddSingleton<IInboxStore>(_ => new SqlServerInboxStore(requiredSqlServerConnectionString));
         builder.Services.AddSingleton<IDocumentArtifactCatalog>(_ => new SqlServerDocumentArtifactCatalogStore(requiredSqlServerConnectionString));
+        builder.Services.AddSingleton<IPublishedActRepository>(serviceProvider => new SqlServerPublishedActRepository(
+            serviceProvider.GetRequiredService<IEventStore>(),
+            requiredSqlServerConnectionString));
+        builder.Services.AddSingleton<IPublishedActReadRepository>(_ => new SqlServerPublishedActProjectionStore(requiredSqlServerConnectionString));
 
         builder.Services.AddSingleton<IDocumentStore>(_ =>
         {
@@ -91,9 +98,12 @@ public static class WorkerDocumentsHostApplication
         });
         builder.Services.AddSingleton<IOcrService, ContainerizedDocumentOcrService>();
         builder.Services.AddSingleton<IIntegrationEventPublisher, MassTransitIntegrationEventPublisher>();
+        builder.Services.AddSingleton<ActsQueryService>();
         builder.Services.AddSingleton<DocumentProcessingService>();
         builder.Services.AddSingleton<DocumentProcessingMessageHandler>();
+        builder.Services.AddSingleton<DocumentArtifactCatchUpService>();
         builder.Services.AddHostedService<WorkerHealthServerHostedService>();
+        builder.Services.AddHostedService<DocumentArtifactCatchUpHostedService>();
 
         var host = builder.Build();
         host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStarted.Register(readinessState.MarkReady);

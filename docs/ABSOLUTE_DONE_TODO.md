@@ -94,15 +94,15 @@ Pozostalo:
 - [x] Miec swiezy end-to-end green dla krytycznych kategorii: `ai`, `replay/backfill`, `projection refresh`, `admin catch-up`.
   Status:
   wspierane profile Docker `dev-laptop`, `dev-laptop --include-ai`, `full-host` i `full-host --include-opensearch` maja juz swiezy green na prawdziwym `RabbitMQ` w kontenerach.
-- [ ] Domknac retry, defer, poison handling i DLQ.
+- [x] Domknac retry, defer, poison handling i DLQ.
   Status:
-  application-level recovery po `DocumentTextExtractedIntegrationEvent` jest juz dowieziony w `worker-ai`, `full-host` uruchamia juz `worker-ai` jako wspierany host, a poison smoke obejmuje juz `ai-enrichment-requested`, `act-artifact-attached` i `document-text-extracted-ai-recovery`; nadal brakuje tylko swiezego zielonego wykonania Docker proof jako finalnego dowodu runtime.
+  application-level recovery po `DocumentTextExtractedIntegrationEvent` jest juz dowieziony w `worker-ai`, `full-host` uruchamia juz `worker-ai` jako wspierany host, a `ops/run-poison-dlq-recovery-smoke.sh --build-local` jest swiezo zielony dla `ai-enrichment-requested`, `worker-documents-act-artifact-attached` i `document-text-extracted-ai-recovery`.
 - [x] Zamknac stance runtime: SQL poller jako jawny fallback/recovery, a nie rownorzedna normalna sciezka.
   Status:
   finalna decyzja jest zamknieta: w profilach z `RabbitMQ` broker jest normalna sciezka runtime, a SQL poller zostaje tylko jako fallback/recovery i bounded catch-up, nie jako rownorzedny primary transport.
-- [ ] Odtworzyc wspierany, kontenerowy proof, ze write path nie czeka na AI/OCR/search/dispatch po stronie broker mode.
+- [x] Odtworzyc wspierany, kontenerowy proof, ze write path nie czeka na AI/OCR/search/dispatch po stronie broker mode.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, a workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`; nadal potrzeba swiezego zielonego wykonania jako dowodu runtime.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, a `ops/run-rabbitmq-write-path-nonblocking-smoke.sh --build-local` jest swiezo zielony z accepted write path, queued backlog i recovery po restarcie `worker-ai`. Workflow `publish-images.yml` nadal ma image-first lane `ghcr-ops-proofs` na `workflow_dispatch` do osobnego proofu GHCR.
 
 Exit criteria:
 
@@ -216,7 +216,7 @@ Exit criteria:
 
 Pozostalo:
 
-- [ ] Zamienic compose/image scaffolding na realne build/publish artifacts dla wszystkich hostow.
+- [ ] Zdobyc swiezy green image-first CI/GHCR proof dla wszystkich host image lanes i publish smoke'ow, skoro packaging flow jest juz zaimplementowany.
   Status:
   Bazowy `ops/compose/docker-compose.yml` i `ops/compose/docker-compose.full-host.yml` sa juz image-first i uzywaja jawnych `LAWWATCHER_*_IMAGE` zamiast lokalnego `build:`. Lokalne buildy zostaly odsuniete do `ops/compose/docker-compose.build.yml` oraz `ops/compose/docker-compose.full-host.build.yml`, `.github/workflows/publish-images.yml` przygotowuje linuxowe obrazy `ghcr.io/<owner>/lawwatcher-*`, a repo ma juz publiczny remote `https://github.com/przemekp95/lawwatcher`. Dla szybkiej iteracji branch push na `main/master` publikuje tylko `linux/amd64`, a wolniejszy multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Workflow ma juz tez post-publish `ghcr-image-smoke` przez `ops/run-ghcr-image-smoke.sh` oraz image-first `ghcr-ops-proofs` na `workflow_dispatch`, ale nadal potrzeba swiezego zielonego proofu z CI jako dowodu wykonaniowego.
 - [x] Dodac finalne Dockerfile lub rownowazny packaging flow.
@@ -253,12 +253,12 @@ Pozostalo:
 - [x] Podjac i dowiezc bezpieczna semantyke cleanup/retention dla `search_documents`.
   Status:
   `search_documents` maja juz jawnie opt-in cleanup przez `searchDocumentsRetentionHours` na `POST /v1/system/maintenance/retention`, oparty o `indexed_at_utc` zamiast ukrytego TTL.
-- [ ] Odtworzyc Linux/Docker-first proof dla retention cleanup po usunieciu dawnego dedykowanego harnessu.
+- [x] Odtworzyc Linux/Docker-first proof dla retention cleanup po usunieciu dawnego dedykowanego harnessu.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, a workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`; nadal potrzeba swiezego green proof jako dowodu runtime.
-- [ ] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu dawnego broker smoke lane.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, a `ops/run-retention-smoke.sh --build-local` jest swiezo zielony dla cleanupu `ai_enrichment_tasks` oraz derived `document_artifacts`. Workflow `publish-images.yml` nadal ma image-first lane `ghcr-ops-proofs` na `workflow_dispatch` do osobnego proofu GHCR.
+- [x] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu dawnego broker smoke lane.
   Status:
-  dedykowany shellowy proof istnieje juz jako `ops/run-structured-log-proof.sh`, a runtime ma stabilny marker `flow=signed-webhook`; workflow `publish-images.yml` ma juz image-first lane `ghcr-ops-proofs` na `workflow_dispatch`, ale potrzeba jeszcze swiezego green proof jako dowodu runtime.
+  dedykowany shellowy proof istnieje juz jako `ops/run-structured-log-proof.sh`, a `ops/run-structured-log-proof.sh --build-local` jest swiezo zielony dla `flow=ai`, `flow=document-ocr`, `flow=document-text-projection`, `flow=replay`, `flow=backfill`, `flow=profile-subscription`, `flow=webhook-registration` i `flow=signed-webhook`, z realnym `signedWebhookDispatchCount` w summary. Dedykowany `ops/run-signed-webhook-smoke.sh` pozostaje osobnym, weziej scoped proofem i nadal jest dopiety do workflow proof lanes.
 - [x] Dodac runbook dla awarii runtime i odtwarzania state/projection.
   Status:
   [docs/RUNBOOK.md](docs/RUNBOOK.md) istnieje juz jako operacyjny runbook dla `dev-laptop`, `ai`, `full-host` i `opensearch`, obejmuje first-response checks, health, Docker/RabbitMQ recovery, `/v1/system/messaging`, retention, broker smoke map, browser admin recovery i zasady bezpiecznego odtwarzania state/projection bez recznego kasowania `outbox/inbox`.

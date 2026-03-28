@@ -1442,6 +1442,67 @@ Expect.True(
     "Document processing service should publish a document-text-extracted integration event after persisting the derived artifact.",
     failures);
 
+var catchUpActRepository = new InMemoryPublishedActRepository();
+var catchUpActProjection = new InMemoryPublishedActProjectionStore();
+var catchUpLegalCorpusCommandService = new LegalCorpusCommandService(catchUpActRepository, catchUpActProjection);
+var catchUpActId = Guid.Parse("C1A5F8B6-57F2-4890-94E9-7A2A2E7AC2A0");
+await catchUpLegalCorpusCommandService.RegisterAsync(
+    new RegisterActCommand(
+        catchUpActId,
+        listedBills[0].Id,
+        listedBills[0].Title,
+        listedBills[0].ExternalId,
+        "https://eli.gov.pl/eli/DU/2026/777/ogl",
+        "Ustawa testowa dla startup catch-up OCR",
+        new DateOnly(2026, 03, 30),
+        new DateOnly(2026, 04, 07)),
+    CancellationToken.None);
+await catchUpLegalCorpusCommandService.AttachArtifactAsync(
+    new AttachActArtifactCommand(
+        catchUpActId,
+        "text",
+        "acts/2026/catch-up-source.txt"),
+    CancellationToken.None);
+
+var catchUpDocumentsRoot = Path.Combine(durableStateRoot, "document-processing", "catch-up-documents");
+var catchUpCatalogRoot = Path.Combine(durableStateRoot, "document-processing", "catch-up-catalog");
+var catchUpDocumentStore = new LocalFileDocumentStore(catchUpDocumentsRoot);
+var catchUpCatalog = new FileBackedDocumentArtifactCatalogStore(catchUpCatalogRoot);
+await using (var catchUpSourceContent = new MemoryStream(Encoding.UTF8.GetBytes("Art. 2. Startup catch-up powinien odtworzyc OCR dla juz zapisanych aktow."), writable: false))
+{
+    await catchUpDocumentStore.PutAsync(
+        new DocumentWriteRequest(
+            LegalCorpusArtifactStorage.Bucket,
+            "acts/2026/catch-up-source.txt",
+            "text/plain",
+            catchUpSourceContent),
+        CancellationToken.None);
+}
+
+var catchUpPublisher = new RecordingIntegrationEventPublisher();
+var catchUpProcessingService = new DocumentProcessingService(
+    catchUpDocumentStore,
+    new ContainerizedDocumentOcrService(catchUpDocumentStore),
+    catchUpCatalog,
+    catchUpPublisher);
+var catchUpService = new DocumentArtifactCatchUpService(
+    NullLogger<DocumentArtifactCatchUpService>.Instance,
+    new ActsQueryService(catchUpActProjection),
+    catchUpActRepository,
+    catchUpProcessingService);
+var catchUpResult = await catchUpService.ProcessPendingActsAsync(CancellationToken.None);
+var catchUpCatalogEntry = await catchUpCatalog.GetBySourceAsync(
+    LegalCorpusArtifactStorage.Bucket,
+    "acts/2026/catch-up-source.txt",
+    CancellationToken.None);
+
+Expect.Equal(1, catchUpResult.ProcessedCount, "Document-artifact catch-up service should process missing OCR artifacts for acts that already exist in durable storage.", failures);
+Expect.Equal(DocumentArtifactStorage.Bucket, catchUpCatalogEntry?.DerivedBucket ?? string.Empty, "Document-artifact catch-up service should persist the derived OCR artifact for already stored act source documents.", failures);
+Expect.True(
+    catchUpPublisher.PublishedEvents.OfType<DocumentTextExtractedIntegrationEvent>().Any(),
+    "Document-artifact catch-up service should republish document-text-extracted integration events after recovering missing OCR artifacts.",
+    failures);
+
 var aiRepository = new InMemoryAiEnrichmentTaskRepository();
 var aiProjection = new InMemoryAiEnrichmentTaskProjectionStore();
 var aiCommandService = new AiEnrichmentCommandService(aiRepository, aiProjection);

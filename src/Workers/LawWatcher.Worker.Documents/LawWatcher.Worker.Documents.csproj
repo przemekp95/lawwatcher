@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\BoundedContexts\AiEnrichment\LawWatcher.AiEnrichment.Infrastructure\LawWatcher.AiEnrichment.Infrastructure.csproj" />
     <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Application\LawWatcher.LegalCorpus.Application.csproj" />
     <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Contracts\LawWatcher.LegalCorpus.Contracts.csproj" />
+    <ProjectReference Include="..\..\BoundedContexts\LegalCorpus\LawWatcher.LegalCorpus.Infrastructure\LawWatcher.LegalCorpus.Infrastructure.csproj" />
     <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Application\LawWatcher.LegislativeIntake.Application.csproj" />
     <ProjectReference Include="..\..\BoundedContexts\LegislativeIntake\LawWatcher.LegislativeIntake.Contracts\LawWatcher.LegislativeIntake.Contracts.csproj" />
   </ItemGroup>

@@ -27,16 +27,29 @@ public sealed class DocumentProcessingService(
     IDocumentArtifactCatalog artifactCatalog,
     IIntegrationEventPublisher integrationEventPublisher)
 {
+    public Task<DocumentProcessingResult> ProcessActArtifactAsync(
+        Guid actId,
+        string kind,
+        string objectKey,
+        CancellationToken cancellationToken)
+    {
+        return ProcessCoreAsync(
+            ownerType: "act",
+            ownerId: actId,
+            sourceKind: kind,
+            sourceDocument: LegalCorpusArtifactStorage.CreateDocumentReference(objectKey),
+            cancellationToken);
+    }
+
     public Task<DocumentProcessingResult> ProcessAsync(
         ActArtifactAttachedIntegrationEvent integrationEvent,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(integrationEvent);
-        return ProcessCoreAsync(
-            ownerType: "act",
-            ownerId: integrationEvent.ActId,
-            sourceKind: integrationEvent.Kind,
-            sourceDocument: LegalCorpusArtifactStorage.CreateDocumentReference(integrationEvent.ObjectKey),
+        return ProcessActArtifactAsync(
+            integrationEvent.ActId,
+            integrationEvent.Kind,
+            integrationEvent.ObjectKey,
             cancellationToken);
     }
 

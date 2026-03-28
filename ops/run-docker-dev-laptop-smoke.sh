@@ -41,6 +41,7 @@ tmp_dir="$(mktemp -d)"
 env_file="${tmp_dir}/dev-laptop.env"
 project_name="lawwatcher-dev-laptop-$(random_suffix)"
 worker_documents_health_port="$(get_free_port)"
+ollama_host_port="$(get_free_port)"
 ocr_capability="false"
 
 if [[ "$include_ai" == "true" ]]; then
@@ -52,6 +53,7 @@ write_env_file_from_example \
   "${env_file}" \
   "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
+  "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=${ocr_capability}"
 
 compose_args=(

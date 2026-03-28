@@ -42,6 +42,7 @@ rabbit_management_port="$(get_free_port)"
 minio_api_port="$(get_free_port)"
 minio_console_port="$(get_free_port)"
 worker_lite_health_port="$(get_free_port)"
+worker_ai_health_port="$(get_free_port)"
 ollama_host_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
 
@@ -56,6 +57,7 @@ write_env_file_from_example \
   "MINIO_API_PORT=${minio_api_port}" \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
+  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true" \
@@ -89,6 +91,7 @@ fi
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
+wait_compose_logs_match "worker-documents startup catch-up pass completed\\. pass=6 passLimit=6" 40 "${compose_args[@]}" -- worker-documents >/dev/null
 
 task_id="$(node -e "process.stdout.write(require('crypto').randomUUID());")"
 subject_id="$(node -e "process.stdout.write(require('crypto').randomUUID());")"

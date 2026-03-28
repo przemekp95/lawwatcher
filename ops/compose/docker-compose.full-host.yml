@@ -13,7 +13,7 @@ services:
       sql-init:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
       hybrid-init:
@@ -57,7 +57,7 @@ services:
       sql-init:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
 
@@ -98,7 +98,7 @@ services:
       sql-init:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
       ollama:
@@ -110,6 +110,8 @@ services:
     image: ${LAWWATCHER_WORKER_NOTIFICATIONS_IMAGE}
     profiles:
       - full-host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       LawWatcher__Runtime__Profile: full-host
@@ -122,13 +124,15 @@ services:
       STORAGE__MINIO__SECRETKEY: ${STORAGE__MINIO__SECRETKEY}
       LawWatcher__WorkerLite__MaxConcurrency: ${WORKERS__NOTIFICATIONS__MAXCONCURRENCY}
       LawWatcher__WorkerLite__EnabledPipelines__0: notifications
+      LawWatcher__Webhooks__Backend: ${LAWWATCHER__WEBHOOKS__BACKEND:-}
+      LawWatcher__Webhooks__SigningSecret: ${LAWWATCHER__WEBHOOKS__SIGNINGSECRET:-}
     ports:
       - "${WORKER_NOTIFICATIONS_HEALTH_PORT:-5394}:8080"
     depends_on:
       sql-init:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
 
@@ -155,7 +159,7 @@ services:
       sql-init:
         condition: service_completed_successfully
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
 

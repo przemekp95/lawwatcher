@@ -49,6 +49,7 @@ rabbit_management_port="$(get_free_port)"
 minio_api_port="$(get_free_port)"
 minio_console_port="$(get_free_port)"
 ollama_host_port="$(get_free_port)"
+worker_ai_health_port="$(get_free_port)"
 worker_projection_health_port="$(get_free_port)"
 worker_notifications_health_port="$(get_free_port)"
 worker_replay_health_port="$(get_free_port)"
@@ -66,6 +67,7 @@ write_env_file_from_example \
   "MINIO_API_PORT=${minio_api_port}" \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
+  "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "WORKER_PROJECTION_HEALTH_PORT=${worker_projection_health_port}" \
   "WORKER_NOTIFICATIONS_HEALTH_PORT=${worker_notifications_health_port}" \
   "WORKER_REPLAY_HEALTH_PORT=${worker_replay_health_port}" \
@@ -74,6 +76,7 @@ write_env_file_from_example \
   "WORKERS__NOTIFICATIONS__MAXCONCURRENCY=1" \
   "WORKERS__REPLAY__MAXCONCURRENCY=1" \
   "WORKERS__PROJECTION__MAXCONCURRENCY=1" \
+  "ENABLE_OPENSEARCH=false" \
   "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
   "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
   "LAWWATCHER__WEBHOOKS__BACKEND=SignedHttp" \
@@ -104,6 +107,19 @@ cleanup() {
   rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
+
+warm_ollama_model() {
+  local payload
+  payload="$(AI_MODEL="${ai_model}" node -e "const payload={model:process.env.AI_MODEL,prompt:'ready',stream:false,keep_alive:'5m'}; process.stdout.write(JSON.stringify(payload));")"
+  if ! curl -fsS --max-time 180 \
+    -H "Content-Type: application/json" \
+    -d "${payload}" \
+    "http://127.0.0.1:${ollama_host_port}/api/generate" >/dev/null; then
+    echo "Failed to warm Ollama model '${ai_model}' before structured-log AI proof." >&2
+    docker "${compose_args[@]}" logs --no-color --tail 200 ollama worker-ai >&2 || true
+    exit 1
+  fi
+}
 
 cat > "${listener_script}" <<'EOF'
 const fs = require('fs');
@@ -139,16 +155,26 @@ setTimeout(() => {
 }, 120000);
 EOF
 
-if [[ "${build_local}" == "true" ]]; then
-  docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
-else
+if [[ "${build_local}" != "true" ]]; then
   pull_compose_images_or_use_local "${compose_args[@]}"
-  docker "${compose_args[@]}" up -d --remove-orphans >/dev/null
+fi
+
+if [[ "${build_local}" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build ollama >/dev/null
+else
+  docker "${compose_args[@]}" up -d ollama >/dev/null
 fi
 
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
 
+if [[ "${build_local}" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
+else
+  docker "${compose_args[@]}" up -d --remove-orphans >/dev/null
+fi
+
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_projection_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_notifications_health_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_replay_health_port}/health/ready" >/dev/null
@@ -156,6 +182,23 @@ wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health
 wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
 echo "Waiting for seeded act OCR artifacts..." >&2
 wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
+
+alerts_ready="false"
+for ((attempt=0; attempt<120; attempt++)); do
+  alerts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/alerts" 2>/dev/null || true)"
+  if [[ -n "${alerts_json}" ]]; then
+    alerts_ready="$(printf '%s' "${alerts_json}" | json_eval "process.stdout.write(String(Array.isArray(data) && data.length > 0));")"
+    if [[ "${alerts_ready}" == "true" ]]; then
+      break
+    fi
+  fi
+  sleep 2
+done
+
+if [[ "${alerts_ready}" != "true" ]]; then
+  echo "Expected seeded alerts to be available before webhook catch-up registration." >&2
+  exit 1
+fi
 
 LISTENER_PORT="${listener_port}" CAPTURE_PATH="${capture_path}" node "${listener_script}" >"${listener_log}" 2>&1 &
 listener_pid=$!
@@ -179,6 +222,8 @@ curl -fsS --max-time 10 -X POST "http://127.0.0.1:${api_port}/v1/webhooks" \
   -H "Authorization: Bearer portal-integrator-demo-token" \
   -H "Content-Type: application/json" \
   -d "${registration_payload}" >/dev/null
+
+warm_ollama_model
 
 ai_payload="$(ACT_ID="${act_id}" ACT_TITLE_JSON="${act_title}" node -e "const title=JSON.parse(process.env.ACT_TITLE_JSON); const payload={kind:'act-summary', subjectType:'act', subjectId:process.env.ACT_ID, subjectTitle:title, prompt:'Udowodnij marker flow=ai w logach strukturalnych.'}; process.stdout.write(JSON.stringify(payload));")"
 ai_accepted="$(curl -fsS --max-time 10 -X POST "http://127.0.0.1:${api_port}/v1/ai/tasks" \
@@ -222,17 +267,33 @@ for ((attempt=0; attempt<140; attempt++)); do
 done
 
 if [[ "${listener_completed}" != "true" ]]; then
+  webhook_dispatches_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/system/webhook-dispatches" 2>/dev/null || true)"
+  webhooks_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/webhooks" 2>/dev/null || true)"
+  alerts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/alerts" 2>/dev/null || true)"
   echo "Structured-log signed webhook listener did not complete in time." >&2
+  if [[ -n "${webhook_dispatches_json}" ]]; then
+    echo "Current /v1/system/webhook-dispatches payload:" >&2
+    printf '%s\n' "${webhook_dispatches_json}" >&2
+  fi
+  if [[ -n "${webhooks_json}" ]]; then
+    echo "Current /v1/webhooks payload:" >&2
+    printf '%s\n' "${webhooks_json}" >&2
+  fi
+  if [[ -n "${alerts_json}" ]]; then
+    echo "Current /v1/alerts payload:" >&2
+    printf '%s\n' "${alerts_json}" >&2
+  fi
+  docker "${compose_args[@]}" logs --no-color --tail 200 api worker-notifications >&2 || true
   exit 1
 fi
 
-wait_compose_logs_match "flow=ai" 90 "${compose_args[@]}" -- api worker-documents >/dev/null
+wait_compose_logs_match "flow=ai" 90 "${compose_args[@]}" -- api worker-ai >/dev/null
 wait_compose_logs_match "flow=document-ocr" 90 "${compose_args[@]}" -- worker-documents >/dev/null
 wait_compose_logs_match "flow=document-text-projection" 90 "${compose_args[@]}" -- worker-projection >/dev/null
 wait_compose_logs_match "flow=replay" 90 "${compose_args[@]}" -- api worker-replay >/dev/null
 wait_compose_logs_match "flow=backfill" 90 "${compose_args[@]}" -- api worker-replay >/dev/null
 wait_compose_logs_match "flow=profile-subscription|flow=webhook-registration" 90 "${compose_args[@]}" -- api worker-notifications >/dev/null
-wait_compose_logs_match "flow=signed-webhook" 90 "${compose_args[@]}" -- api >/dev/null
+wait_compose_logs_match "flow=signed-webhook" 90 "${compose_args[@]}" -- worker-notifications >/dev/null
 
 mkdir -p "$(dirname "${summary_path}")"
 
@@ -240,4 +301,4 @@ COMPLETED_AI_TASK_JSON="${completed_ai_task_json}" \
 COMPLETED_REPLAY_JSON="${completed_replay_json}" \
 COMPLETED_BACKFILL_JSON="${completed_backfill_json}" \
 CAPTURES_JSON="$(cat "${capture_path}")" \
-node -e "const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const captures=JSON.parse(process.env.CAPTURES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), aiTaskStatus:aiTask.status, replayStatus:replay.status, backfillStatus:backfill.status, signedWebhookDispatchCount:captures.length, verifiedFlows:['ai','document-ocr','document-text-projection','replay','backfill','admin-catch-up','signed-webhook']}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"
+node -e "const aiTask=JSON.parse(process.env.COMPLETED_AI_TASK_JSON); const replay=JSON.parse(process.env.COMPLETED_REPLAY_JSON); const backfill=JSON.parse(process.env.COMPLETED_BACKFILL_JSON); const captures=JSON.parse(process.env.CAPTURES_JSON); const summary={verifiedAtUtc:new Date().toISOString(), aiTaskStatus:aiTask.status, replayStatus:replay.status, backfillStatus:backfill.status, signedWebhookDispatchCount:captures.length, verifiedFlows:['ai','document-ocr','document-text-projection','replay','backfill','profile-subscription','webhook-registration','signed-webhook']}; process.stdout.write(JSON.stringify(summary, null, 2));" | tee "${summary_path}"

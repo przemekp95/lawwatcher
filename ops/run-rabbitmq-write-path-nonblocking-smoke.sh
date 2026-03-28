@@ -86,6 +86,77 @@ cleanup() {
 }
 trap cleanup EXIT
 
+dump_worker_ai_recovery_diagnostics() {
+  local ready_url="http://127.0.0.1:${worker_ai_health_port}/health/ready"
+  local ready_status=""
+  local ready_body=""
+  local ready_body_file
+  local messaging_json=""
+
+  ready_body_file="$(mktemp)"
+  ready_status="$(curl -sS --max-time 10 -o "${ready_body_file}" -w '%{http_code}' "${ready_url}" 2>/dev/null || true)"
+  ready_body="$(cat "${ready_body_file}" 2>/dev/null || true)"
+  rm -f "${ready_body_file}"
+  messaging_json="$(curl -fsS --max-time 10 -H "Authorization: Bearer portal-integrator-demo-token" "http://127.0.0.1:${api_port}/v1/system/messaging" 2>/dev/null || true)"
+
+  echo "worker-ai recovery diagnostics:" >&2
+  if [[ -n "${ready_status}" ]]; then
+    echo "Last /health/ready status: ${ready_status}" >&2
+  fi
+  if [[ -n "${ready_body}" ]]; then
+    echo "Last /health/ready body:" >&2
+    printf '%s\n' "${ready_body}" >&2
+  fi
+  if [[ -n "${messaging_json}" ]]; then
+    echo "Current /v1/system/messaging payload:" >&2
+    printf '%s\n' "${messaging_json}" >&2
+  fi
+  docker "${compose_args[@]}" ps >&2 || true
+  docker "${compose_args[@]}" logs --no-color --tail 200 worker-ai api ollama >&2 || true
+}
+
+wait_worker_ai_ready_or_dump() {
+  local ready_url="http://127.0.0.1:${worker_ai_health_port}/health/ready"
+  local body_file
+  local status=""
+  local body=""
+  local last_status=""
+  local last_body=""
+
+  body_file="$(mktemp)"
+
+  for ((attempt=0; attempt<120; attempt++)); do
+    : >"${body_file}"
+    status="$(curl -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "${ready_url}" 2>/dev/null || true)"
+    body="$(cat "${body_file}" 2>/dev/null || true)"
+
+    if [[ "${status}" =~ ^2[0-9][0-9]$ && -n "${body}" ]]; then
+      rm -f "${body_file}"
+      return 0
+    fi
+
+    if [[ -n "${status}" && "${status}" != "000" ]]; then
+      last_status="${status}"
+      last_body="${body}"
+    fi
+
+    sleep 2
+  done
+
+  rm -f "${body_file}"
+  if [[ -n "${last_status}" ]]; then
+    echo "worker-ai did not recover readiness in time after restart. Last HTTP status: ${last_status}" >&2
+  else
+    echo "worker-ai did not recover readiness in time after restart." >&2
+  fi
+  if [[ -n "${last_body}" ]]; then
+    echo "Last observed /health/ready body before diagnostics:" >&2
+    printf '%s\n' "${last_body}" >&2
+  fi
+  dump_worker_ai_recovery_diagnostics
+  exit 1
+}
+
 if [[ "${build_local}" == "true" ]]; then
   docker "${compose_args[@]}" up -d --build >/dev/null
 else
@@ -94,10 +165,11 @@ else
 fi
 
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/live" >/dev/null
+ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
 wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
 wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
-ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
 echo "Waiting for seeded act OCR artifacts..." >&2
 wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
@@ -127,11 +199,12 @@ task_id="$(cat "${accepted_body}" | json_eval "process.stdout.write(String(data.
 
 queued_task_json=""
 messaging_json=""
+backlog_ready="0"
 for ((attempt=0; attempt<90; attempt++)); do
   queued_task_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" || true)"
   messaging_json="$(curl -fsS --max-time 10 -H "Authorization: Bearer portal-integrator-demo-token" "http://127.0.0.1:${api_port}/v1/system/messaging" || true)"
   if [[ -n "${queued_task_json}" && -n "${messaging_json}" ]]; then
-    backlog_ready="$(TASK_ID="${task_id}" node -e "const fs=require('fs'); const tasks=JSON.parse(process.env.TASKS_JSON); const messaging=JSON.parse(process.env.MESSAGING_JSON); const task=(Array.isArray(tasks)?tasks:[]).find(item => String(item.id)===process.env.TASK_ID); const endpoints=((messaging.broker||{}).endpoints||[]); const aiEndpoint=endpoints.find(item => String(item.endpointName||'').includes('ai-enrichment-requested')); const ok=task && task.status==='queued' && aiEndpoint && Number(aiEndpoint.readyCount||0) > 0 && Number(aiEndpoint.consumerCount||0) === 0; process.stdout.write(ok ? '1' : '0');" TASKS_JSON="${queued_task_json}" MESSAGING_JSON="${messaging_json}")"
+    backlog_ready="$(TASK_ID="${task_id}" TASKS_JSON="${queued_task_json}" MESSAGING_JSON="${messaging_json}" node -e "const tasks=JSON.parse(process.env.TASKS_JSON); const messaging=JSON.parse(process.env.MESSAGING_JSON); const task=(Array.isArray(tasks)?tasks:[]).find(item => String(item.id)===process.env.TASK_ID); const endpoints=((messaging.broker||{}).endpoints||[]); const aiEndpoint=endpoints.find(item => String(item.endpointName||'').includes('ai-enrichment-requested')); const ok=task && task.status==='queued' && aiEndpoint && Number(aiEndpoint.readyCount||0) > 0 && Number(aiEndpoint.consumerCount||0) === 0; process.stdout.write(ok ? '1' : '0');")"
     if [[ "${backlog_ready}" == "1" ]]; then
       break
     fi
@@ -145,7 +218,9 @@ if [[ "${backlog_ready:-0}" != "1" ]]; then
 fi
 
 docker "${compose_args[@]}" start worker-ai >/dev/null
-wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
+wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/live" >/dev/null
+ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+wait_worker_ai_ready_or_dump
 completed_task_json="$(wait_entity_completed "http://127.0.0.1:${api_port}/v1/ai/tasks" "${task_id}" 320)"
 
 mkdir -p "$(dirname "${summary_path}")"

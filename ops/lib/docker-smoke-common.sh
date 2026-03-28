@@ -180,7 +180,12 @@ wait_entity_completed() {
         return 0
       fi
       if [[ "$status" == "failed" ]]; then
+        matched="$(JSON_PAYLOAD="$body" ENTITY_ID="$entity_id" node -e "const data=JSON.parse(process.env.JSON_PAYLOAD); const items=Array.isArray(data)?data:(data.value||[]); const target=process.env.ENTITY_ID; const match=items.find(item => String(item.id)===target); if (match) process.stdout.write(JSON.stringify(match));")"
         echo "Entity '$entity_id' at '$url' failed." >&2
+        if [[ -n "$matched" ]]; then
+          echo "Failed entity payload:" >&2
+          printf '%s\n' "$matched" >&2
+        fi
         exit 1
       fi
     fi
@@ -315,9 +320,16 @@ ensure_docker_ollama_model() {
   local model="$1"
   shift
   local compose_args=("$@")
-  local ollama_host_port
+  local ollama_host_port="${OLLAMA_HOST_PORT:-}"
 
-  ollama_host_port="$(resolve_compose_published_port ollama 11434/tcp "${compose_args[@]}")"
+  if [[ -n "${ollama_host_port}" ]] && [[ ! "${ollama_host_port}" =~ ^[0-9]+$ ]]; then
+    echo "OLLAMA_HOST_PORT must be numeric when provided, got '${ollama_host_port}'." >&2
+    exit 1
+  fi
+
+  if [[ -z "${ollama_host_port}" ]]; then
+    ollama_host_port="$(resolve_compose_published_port ollama 11434/tcp "${compose_args[@]}")"
+  fi
 
   wait_http_ok "http://127.0.0.1:${ollama_host_port}/api/tags" 120 >/dev/null
 
@@ -325,7 +337,11 @@ ensure_docker_ollama_model() {
     return 0
   fi
 
-  docker "${compose_args[@]}" exec -T ollama ollama pull "$model" >/dev/null 2>&1
+  if ! docker "${compose_args[@]}" exec -T ollama ollama pull "$model" >/dev/null 2>&1; then
+    echo "Failed to pull Ollama model '${model}' inside the compose runtime." >&2
+    docker "${compose_args[@]}" logs --no-color --tail 200 ollama >&2 || true
+    exit 1
+  fi
 }
 
 docker_compose_json_array() {

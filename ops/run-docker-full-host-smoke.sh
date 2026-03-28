@@ -46,6 +46,7 @@ tmp_dir="$(mktemp -d)"
 env_file="${tmp_dir}/full-host.env"
 worker_ai_health_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
+ollama_host_port="$(get_free_port)"
 
 write_env_file_from_example \
   "ops/env/full-host.env.example" \
@@ -53,6 +54,7 @@ write_env_file_from_example \
   "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
+  "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
 
 compose_args=(
@@ -80,17 +82,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [[ "$build_local" != "true" ]]; then
+  pull_compose_images_or_use_local "${compose_args[@]}"
+fi
+
+if [[ "$include_opensearch" == "true" ]]; then
+  if [[ "$build_local" == "true" ]]; then
+    docker "${compose_args[@]}" up -d --build opensearch ollama >/dev/null
+  else
+    docker "${compose_args[@]}" up -d opensearch ollama >/dev/null
+  fi
+
+  wait_http_ok "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
+  ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
+  ensure_docker_ollama_model "$embedding_model" "${compose_args[@]}"
+else
+  if [[ "$build_local" == "true" ]]; then
+    docker "${compose_args[@]}" up -d --build ollama >/dev/null
+  else
+    docker "${compose_args[@]}" up -d ollama >/dev/null
+  fi
+
+  ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
+fi
+
 if [[ "$build_local" == "true" ]]; then
   docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
 else
-  pull_compose_images_or_use_local "${compose_args[@]}"
   docker "${compose_args[@]}" up -d --remove-orphans >/dev/null
-fi
-
-ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
-if [[ "$include_opensearch" == "true" ]]; then
-  ensure_docker_ollama_model "$embedding_model" "${compose_args[@]}"
-  wait_http_ok "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
 fi
 
 wait_http_ok "http://127.0.0.1:8080/health/ready" >/dev/null
