@@ -1,106 +1,88 @@
 # LawWatcher Runbook
 
-This runbook covers first response, runtime recovery and safe state or projection recovery for the supported LawWatcher profiles.
+This runbook covers incident response, recovery order, and safe operational actions.
 
-The supported operational contract is Docker-first and host-OS-neutral: raw `docker compose` is the source of truth, and the checked-in `ops/*.sh` wrappers are only a thin POSIX shell layer over the same compose profiles.
+It does not restate the full runtime contract. For supported profiles, startup commands, environment examples, and
+API surface, use [README.md](../README.md).
 
-## Supported Runtime Profiles
+## Scope
 
-- `dev-laptop`: `sqlserver`, `rabbitmq`, `minio`, `api`, `portal`, `worker-lite`
-- `ai`: `ollama`, `worker-ai`
-- `full-host`: `api`, `portal`, `worker-ai`, `worker-projection`, `worker-notifications`, `worker-replay`, `worker-documents`, `sqlserver`, `rabbitmq`, `minio`, `ollama`
-- `opensearch`: optional add-on for `full-host`
-- when `ENABLE_OPENSEARCH=true`, Compose runs a one-shot `hybrid-init` preflight before `api` and `worker-projection`; it waits for `OpenSearch` and pulls the configured Ollama embedding model so `HybridVector` is computed truthfully on first boot
-
-Primary entrypoints:
-
-```bash
-bash ops/run-docker-dev-laptop.sh
-bash ops/run-docker-dev-laptop.sh --include-ai
-bash ops/run-docker-full-host.sh
-bash ops/run-docker-full-host.sh --include-opensearch
-```
-
-Stop scripts:
-
-```bash
-bash ops/stop-docker-dev-laptop.sh
-bash ops/stop-docker-full-host.sh
-```
-
-The checked-in Docker env examples keep the demo operator account and demo API-client seeds disabled by default. Only the smoke scripts opt into those demo seeds explicitly when they need local browser or bearer auth proofs.
+- [README.md](../README.md) is the source of truth for supported runtime profiles, startup and stop commands,
+  Docker-first execution, environment examples, and endpoint capabilities.
+- This runbook is the source of truth for incident handling, recovery-safe proof selection, escalation evidence, and
+  actions that are explicitly unsafe.
+- The supported operational contract is still Docker-first and host-OS-neutral: raw `docker compose` is the source
+  of truth, and the checked-in `ops/*.sh` wrappers are only a thin POSIX shell layer over the same compose profiles.
 
 ## First Response
 
-When a runtime looks broken, do not start with retention cleanup or manual SQL deletes. Start with these checks in order.
+Do not start with retention cleanup, replay, backfill, or manual SQL edits. Use this order.
 
-### 1. Check host health
+### 1. Identify the failing slice
+
+Pick the smallest affected slice before you touch anything:
+
+- baseline runtime
+- AI runtime
+- full-host runtime
+- full-host with `OpenSearch`
+- browser admin flow
+- broker delivery or projection refresh
+
+### 2. Run the smallest safe proof first
+
+Start with host readiness:
 
 ```bash
 bash ops/run-host-health-smoke.sh
 ```
 
-Expected:
-
-- `GET /health/live` returns healthy for `api`, `worker-lite`, `worker-ai` when they are meant to be running
-- `GET /health/ready` returns healthy and includes dependency checks such as `sqlserver`, `rabbitmq` and `ollama` when applicable
-
-The shared Docker health and AI smoke helpers resolve the actual compose-published `ollama` host port before they probe `/api/tags`. Do not diagnose a health-smoke failure against a hard-coded `127.0.0.1:11434` assumption when the stack was started on random local ports.
-
-If a host is not ready:
-
-- read the matching `*-out.log` and `*-err.log` artifacts created by the smoke
-- verify the profile you started actually includes that host
-- restart only the affected profile first before touching storage or retention
-
-### 2. Check Docker or local process state
-
-For Docker profiles:
-
-```bash
-docker compose -f ops/compose/docker-compose.yml --env-file ops/env/dev-laptop.env.example ps
-docker compose -f ops/compose/docker-compose.yml -f ops/compose/docker-compose.full-host.yml --env-file ops/env/full-host.env.example ps
-```
-
-If Docker is the chosen runtime, prefer restarting the affected profile through repo wrappers instead of `docker kill` on individual containers.
-
-### 3. Check runtime messaging state
-
-`GET /v1/system/messaging` is the source of truth for SQL outbox and inbox state.
-
-- browser path: operator cookie auth
-- machine-to-machine path: bearer with `api-clients:write`
-
-Use it to answer:
-
-- is the host running `rabbitmq` delivery or primary `sql-poller`
-- which `message_type` rows are still pending or deferred in `outbox`
-- which `consumer_name` entries have processed inbox rows
-- which broker endpoints currently have ready or unacked messages
-- whether broker consumers are attached to the expected endpoint queues
-- whether fault or dead-letter queues are accumulating messages
-- whether `document-text-extracted-ai-recovery` is recovering queued OCR-dependent AI tasks instead of leaving them stranded in `queued`
-
-If `deliveryMode=rabbitmq` and `pollerMode=fallback`, broker consumers are the main path and SQL poll loops are only safety nets.
-
-### 4. Check current recovery-safe proofs
-
-Before making changes, try the smallest supported smoke for the affected runtime profile. If the smoke is green, the problem is probably local state drift, not a general runtime outage.
+Then run the narrowest proof for the failing slice:
 
 - baseline Docker runtime: `bash ops/run-docker-dev-laptop-smoke.sh`
-- Docker runtime with AI: `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
+- baseline Docker runtime with AI: `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
 - full-host runtime: `bash ops/run-docker-full-host-smoke.sh`
-- full-host with OpenSearch: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
-- MinIO-backed AI grounding: `ops/run-act-ai-grounding-minio-smoke.sh`
-- write-path nonblocking proof: `bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh`
-- retention proof: `bash ops/run-retention-smoke.sh`
-- structured-log proof: `bash ops/run-structured-log-proof.sh`
-- operator auth and admin CRUD: `ops/run-operator-admin-smoke.sh`
-- browser admin CRUD: `ops/run-operator-admin-browser-smoke.sh`
+- full-host runtime with hybrid/vector search: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
+- browser admin flow: `bash ops/run-operator-admin-smoke.sh`, then `bash ops/run-operator-admin-browser-smoke.sh`
+- signed webhook delivery: `bash ops/run-signed-webhook-smoke.sh`
+- retention lane: `bash ops/run-retention-smoke.sh`
+- write-path nonblocking lane: `bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh`
+- structured logs: `bash ops/run-structured-log-proof.sh`
+- MinIO-backed act grounding: `bash ops/run-act-ai-grounding-minio-smoke.sh`
 
-## Common Incident Playbooks
+If the smallest proof is green, treat the issue as local state drift or an environment-specific problem before you
+assume a general runtime regression.
 
-### API Is Up But Not Ready
+### 3. Check host and messaging diagnostics
+
+For host readiness issues:
+
+- inspect the matching `*-out.log` and `*-err.log`
+- inspect the matching summary under `output/health` or `output/smoke`
+- verify that the selected profile actually includes the host you expect
+
+For async or broker issues, use `GET /v1/system/messaging` as the source of truth for:
+
+- `deliveryMode` and `pollerMode`
+- pending or deferred outbox rows
+- processed inbox rows by `consumer_name`
+- broker endpoint `readyCount`, `unackedCount`, `faultCount`, and `deadLetterCount`
+- whether OCR recovery is happening through `document-text-extracted-ai-recovery`
+
+### 4. Restart only the smallest affected slice
+
+Prefer the smallest restart that matches the failure:
+
+- restart one dependency first
+- then restart the affected runtime profile through the supported wrapper
+- restart the whole stack only if smaller restarts did not recover the flow
+
+Do not mix repo wrappers with ad hoc `docker kill` or manual container surgery unless you are collecting low-level
+evidence.
+
+## Incident Playbooks
+
+### API is live but not ready
 
 Symptoms:
 
@@ -109,100 +91,93 @@ Symptoms:
 
 Actions:
 
-1. Check whether the failing dependency is `sqlserver`, `rabbitmq`, `ollama` or `opensearch`.
-2. Restart only the affected dependency first.
-3. Re-run `ops/run-host-health-smoke.sh`.
-4. If readiness is still red, inspect logs and matching smoke summaries under `output`.
+1. Identify the failing dependency: `sqlserver`, `rabbitmq`, `ollama`, or `opensearch`.
+2. Restart only that dependency or the smallest affected profile.
+3. Re-run `bash ops/run-host-health-smoke.sh`.
+4. If readiness is still red, keep the smoke summary and host logs before any wider restart.
 
 Do not start retention cleanup for a readiness failure.
 
-### RabbitMQ Is Down Or Broker Delivery Stalls
+### RabbitMQ is down or broker delivery stalls
 
 Symptoms:
 
-- broker smoke fails before or during delivery
-- `/v1/system/messaging` shows growing pending `outbox`
-- no matching `inbox` movement for target consumer
+- broker-oriented smoke fails before or during delivery
+- `/v1/system/messaging` shows growing pending outbox rows
+- no matching inbox movement for the expected consumer
 
 Actions:
 
-1. Restart the affected Docker profile so `rabbitmq` comes back through the supported runtime path.
-2. Re-run the smallest supported profile smoke for the affected flow.
-3. Confirm `/v1/system/messaging` now shows `published` outbox rows and matching `inbox` entries.
-4. In broker mode, also confirm the broker section no longer shows growing `readyCount`, `faultCount` or `deadLetterCount` for the affected endpoint.
-4. Only if the stack still looks inconsistent, restart the affected runtime profile again from the repo wrapper.
+1. Restart the affected runtime profile through the supported Docker wrapper path.
+2. Re-run the smallest proof for the affected flow.
+3. Re-check `/v1/system/messaging` and confirm the original stuck condition is gone.
+4. If `deliveryMode=rabbitmq`, verify that broker counts no longer accumulate on the affected endpoint.
 
 Do not manually delete `outbox` or `inbox` rows.
 
-### Projection Looks Stale
+### Search, events, or alerts look stale
 
 Symptoms:
 
-- search, event feed, alerts or profile read model does not reflect recent writes
-- broker smoke for the same flow fails on projection assertions
+- search results, event feed, alerts, or profile views do not reflect recent writes
+- a smoke for that slice fails on projection assertions
 
-In broker mode, the projection loop already does bounded startup catch-up passes for alerts, event feed and search before it settles into steady-state broker-only processing. After a cold boot or redeploy, give that warm-up window a chance to finish before you treat an initially empty search result as a stuck projection.
+In broker mode, projection refresh already does bounded startup catch-up. After a cold boot or redeploy, give that
+warm-up window a chance to finish before you treat an initially empty projection as stuck.
 
 Actions:
 
 1. Check `/v1/system/messaging` for the relevant `message_type` and `consumer_name`.
-2. Run the matching broker smoke for that projection slice.
-3. If the smoke is green, recheck the user-visible read model through the same endpoint the smoke uses.
-4. If the smoke is red, keep the failing summary JSON and host logs, then restart the affected runtime profile and re-run the same smoke.
+2. Run the matching projection-oriented smoke.
+3. If the smoke is green, re-check the user-visible endpoint.
+4. If the smoke is red, keep the summary and logs, then restart the affected profile and re-run the same proof.
 
-Safe projection-oriented smoke map:
+### Replay or backfill is needed intentionally
 
-- laptop-first projection issues: `bash ops/run-docker-dev-laptop-smoke.sh`
-- laptop-first with AI or grounding concerns: `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
-- full-host projection issues: `bash ops/run-docker-full-host-smoke.sh`
-- full-host with hybrid/vector search concerns: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
+Replay and backfill are not first-response tools. Use them only when you are intentionally repopulating or re-driving
+state.
 
-### Replay Or Backfill Is Needed
+Recommended sequence:
 
-Use replay or backfill only when you need to repopulate or re-drive state intentionally, not as a first reaction to every incident.
+1. Capture current diagnostics first.
+2. Prove the runtime is otherwise healthy with `bash ops/run-docker-full-host-smoke.sh`.
+3. Only then issue the replay or backfill you actually mean to run.
 
-Preferred proof:
+For endpoint details and supported auth surface, use [README.md](../README.md).
 
-```bash
-bash ops/run-docker-full-host-smoke.sh
-```
-
-Use direct API commands only when you know the request you need to issue and you have already captured current diagnostics.
-
-### AI Task Fails Or Grounding Looks Wrong
+### AI task fails or grounding looks wrong
 
 Symptoms:
 
 - AI task stays pending
-- readiness for `worker-ai` is red
-- readiness for `worker-documents` is red
-- response lacks `ELI` or `document://` citations
+- `worker-ai` readiness is red
+- `worker-documents` readiness is red
+- AI response lacks expected `ELI` or `document://` citations
 
 Actions:
 
-1. Run `ops/run-host-health-smoke.sh` and confirm both `worker-ai` and `worker-documents` readiness.
+1. Run `bash ops/run-host-health-smoke.sh`.
 2. Verify the container model:
 
 ```bash
 bash ops/ensure-docker-ollama-model.sh llama3.2:1b
 ```
 
-If the runtime was started through a smoke wrapper on random local ports, prefer the repo helpers over manual `curl` calls to `127.0.0.1:11434`; the helpers already resolve the current compose-published `ollama` port.
-
 3. Re-run the smallest relevant proof:
 
 - `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
-- `ops/run-act-ai-grounding-minio-smoke.sh`
+- `bash ops/run-act-ai-grounding-minio-smoke.sh`
 
-If the MinIO grounding smoke is green but a user task is wrong, treat it as content or prompt quality investigation, not OCR/storage-path recovery.
+If the MinIO grounding proof is green but a user-facing answer is still poor, treat it as content or prompt quality
+investigation, not storage or OCR recovery.
 
-### Browser Admin Flow Fails
+### Browser admin flow fails
 
 Symptoms:
 
 - login fails
-- CRUD action returns `400` due to missing antiforgery
-- browser `/admin` flow diverges from backend smoke
+- a browser write returns `400` because antiforgery is missing
+- browser `/admin` behavior diverges from backend behavior
 
 Actions:
 
@@ -224,79 +199,62 @@ bash ops/run-operator-admin-browser-smoke.sh
 - `output/playwright/admin-authenticated.png`
 - `output/playwright/admin-logged-out.png`
 
-If backend admin smoke is green but browser smoke is red, treat it as a portal/client issue, not an auth-store or API recovery problem.
+If backend admin proof is green but browser proof is red, treat it as a portal/client issue, not a backend auth-store
+or API recovery issue.
 
 ## Safe Maintenance Actions
 
-### Retention Cleanup
+### Retention cleanup
 
-`POST /v1/system/maintenance/retention` is safe only for removing old rows according to an explicit age policy.
+`POST /v1/system/maintenance/retention` is safe only for age-based cleanup after diagnostics are already captured.
 
-Guidance:
+Use it this way:
 
-- use retention after diagnostics are captured, not before
-- do not use retention as a substitute for replay, backfill or broker recovery
-- `search_documents` cleanup is opt-in through `searchDocumentsRetentionHours`
-- terminal AI-task cleanup is opt-in through `aiTasksRetentionHours`
-- `documentArtifactsRetentionHours` prunes only cataloged derived OCR/AI artifacts; do not treat it as a source-document delete lane
+- after evidence is collected
+- not as a substitute for replay, backfill, broker recovery, or readiness recovery
+- with the understanding that `documentArtifactsRetentionHours` prunes only derived OCR or AI artifacts, not source
+  documents
 
-### Restart Policy
+### Restarts
 
-Prefer the smallest restart that matches the failing slice:
+Prefer the smallest supported restart path and use the documented wrapper commands from [README.md](../README.md).
 
-- single local dependency first
-- then runtime profile wrapper
-- then full stack restart only if smaller restarts did not recover the flow
+Use raw manual container manipulation only when you are collecting evidence and you know why the wrapper path is not
+enough.
 
-Prefer:
+## Evidence Before Escalation
 
-```bash
-bash ops/stop-docker-dev-laptop.sh
-bash ops/run-docker-dev-laptop.sh
-```
-
-or:
-
-```bash
-bash ops/stop-docker-full-host.sh
-bash ops/run-docker-full-host.sh --include-opensearch
-```
-
-Do not mix raw manual container surgery with repo wrappers unless you are collecting low-level evidence.
-
-## Evidence To Collect Before Escalation
-
-Keep these artifacts:
+Collect and keep:
 
 - matching `output/smoke/*.json` summary
 - matching `output/health/*.json` summary
 - matching `output/playwright/*.json` summary and screenshots for browser issues
-- host `*-out.log` and `*-err.log`
-- `/v1/system/messaging` response snapshot
+- matching host `*-out.log` and `*-err.log`
+- `/v1/system/messaging` response snapshot when async or broker behavior is involved
 - `/health/live` and `/health/ready` responses for affected hosts
 
-When the issue is broker-related, include:
+For broker issues also capture:
 
-- the exact failing `message_type`
-- the expected `consumer_name`
-- whether `deliveryMode` was `rabbitmq` or `sql-poller`
-- whether `pollerMode` was `fallback` or primary
-- the affected broker `endpointName`
-- current broker `readyCount`, `unackedCount`, `faultCount` and `deadLetterCount`
+- failing `message_type`
+- expected `consumer_name`
+- `deliveryMode`
+- `pollerMode`
+- affected broker `endpointName`
+- broker `readyCount`, `unackedCount`, `faultCount`, and `deadLetterCount`
 
 ## Things Not To Do
 
-- do not manually delete `outbox`, `inbox`, `event_feed` or `search_documents` rows as a first response
+- do not manually delete `outbox`, `inbox`, `event_feed`, or search rows as first response
 - do not run retention before collecting diagnostics
 - do not claim broker failure without checking `GET /v1/system/messaging`
-- do not treat browser admin failures as backend auth failures until `ops/run-operator-admin-smoke.sh` is checked
-- do not treat AI grounding failures as RabbitMQ failures until `worker-ai` readiness and MinIO grounding smoke are checked
+- do not treat browser admin failures as backend auth failures until backend admin proof is checked
+- do not treat AI grounding failures as RabbitMQ failures until host readiness and AI grounding proof are checked
 
 ## Recovery Exit Criteria
 
-An incident is considered recovered only when:
+An incident is recovered only when:
 
 - affected hosts are healthy on both `/health/live` and `/health/ready`
-- the smallest relevant smoke for the incident is green
-- `/v1/system/messaging` no longer shows the original stuck condition
-- user-visible projection or admin flow is confirmed again through the matching endpoint or browser smoke
+- the smallest relevant proof for the incident is green
+- `/v1/system/messaging` no longer shows the original stuck condition when async delivery was involved
+- the affected user-visible endpoint or browser flow is confirmed again
