@@ -55,6 +55,7 @@ write_env_file_from_example \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
+  "ENABLE_OPENSEARCH=${include_opensearch}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
 
 compose_args=(
