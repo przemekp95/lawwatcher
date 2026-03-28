@@ -102,7 +102,7 @@ Pozostalo:
   finalna decyzja jest zamknieta: w profilach z `RabbitMQ` broker jest normalna sciezka runtime, a SQL poller zostaje tylko jako fallback/recovery i bounded catch-up, nie jako rownorzedny primary transport.
 - [x] Odtworzyc wspierany, kontenerowy proof, ze write path nie czeka na AI/OCR/search/dispatch po stronie broker mode.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, a `ops/run-rabbitmq-write-path-nonblocking-smoke.sh --build-local` jest swiezo zielony z accepted write path, queued backlog i recovery po restarcie `worker-ai`. Workflow `publish-images.yml` nadal ma image-first lane `ghcr-ops-proofs` na `workflow_dispatch` do osobnego proofu GHCR.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-rabbitmq-write-path-nonblocking-smoke.sh`, a `ops/run-rabbitmq-write-path-nonblocking-smoke.sh --build-local` jest swiezo zielony z accepted write path, queued backlog i recovery po restarcie `worker-ai`. Ten sam proof przeszedl tez image-first w `publish-images` workflow_dispatch run `23680408544` 28 marca 2026.
 
 Exit criteria:
 
@@ -216,18 +216,18 @@ Exit criteria:
 
 Pozostalo:
 
-- [ ] Zdobyc swiezy green image-first CI/GHCR proof dla wszystkich host image lanes i publish smoke'ow, skoro packaging flow jest juz zaimplementowany.
+- [x] Zdobyc swiezy green image-first CI/GHCR proof dla wszystkich host image lanes i publish smoke'ow, skoro packaging flow jest juz zaimplementowany.
   Status:
-  Bazowy `ops/compose/docker-compose.yml` i `ops/compose/docker-compose.full-host.yml` sa juz image-first i uzywaja jawnych `LAWWATCHER_*_IMAGE` zamiast lokalnego `build:`. Lokalne buildy zostaly odsuniete do `ops/compose/docker-compose.build.yml` oraz `ops/compose/docker-compose.full-host.build.yml`, `.github/workflows/publish-images.yml` przygotowuje linuxowe obrazy `ghcr.io/<owner>/lawwatcher-*`, a repo ma juz publiczny remote `https://github.com/przemekp95/lawwatcher`. Dla szybkiej iteracji branch push na `main/master` publikuje tylko `linux/amd64`, a wolniejszy multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Workflow ma juz tez post-publish `ghcr-image-smoke` przez `ops/run-ghcr-image-smoke.sh` oraz image-first `ghcr-ops-proofs` na `workflow_dispatch`, ale nadal potrzeba swiezego zielonego proofu z CI jako dowodu wykonaniowego.
+  Bazowy `ops/compose/docker-compose.yml` i `ops/compose/docker-compose.full-host.yml` sa juz image-first i uzywaja jawnych `LAWWATCHER_*_IMAGE` zamiast lokalnego `build:`. Lokalne buildy zostaly odsuniete do `ops/compose/docker-compose.build.yml` oraz `ops/compose/docker-compose.full-host.build.yml`, `.github/workflows/publish-images.yml` przygotowuje linuxowe obrazy `ghcr.io/<owner>/lawwatcher-*`, a repo ma juz publiczny remote `https://github.com/przemekp95/lawwatcher`. Dla szybkiej iteracji branch push na `main/master` publikuje tylko `linux/amd64`, a wolniejszy multi-arch `linux/amd64,linux/arm64` zostaje na tagi `v*`. Swiezy proof wykonaniowy jest juz zamkniety: `publish-images` push run `23680137422` i `publish-images` workflow_dispatch run `23680408544` z `ghcr-image-smoke` oraz `ghcr-ops-proofs` byly zielone 28 marca 2026.
 - [x] Dodac finalne Dockerfile lub rownowazny packaging flow.
   Status:
-  `ops/compose/Dockerfile.host` jest juz wspolnym packaging flow dla hostow, `.dockerignore` ogranicza kontekst, a workflow `publish-images.yml` buduje obrazy dla `api`, `portal`, `worker-lite`, `worker-ai`, `worker-documents`, `worker-projection`, `worker-notifications` i `worker-replay`. Otwarty pozostaje juz nie sam Dockerfile, tylko runtime proof z samego GHCR, a nie tylko lokalnego build override.
-- [ ] Zweryfikowac `docker compose up` dla deklarowanych profili.
+  `ops/compose/Dockerfile.host` jest juz wspolnym packaging flow dla hostow, `.dockerignore` ogranicza kontekst, a workflow `publish-images.yml` buduje obrazy dla `api`, `portal`, `worker-lite`, `worker-ai`, `worker-documents`, `worker-projection`, `worker-notifications` i `worker-replay`. Runtime proof z samego GHCR zostal juz dowieziony swiezymi green runami z 28 marca 2026.
+- [x] Zweryfikowac `docker compose up` dla deklarowanych profili.
   Status:
-  `dev-laptop`, `full-host` i `full-host + opensearch` sa juz swiezo zweryfikowane lokalnie przez build override. Dla finalnego done-state decydujacy jest `full-host + opensearch`; nadal otwarty jest swiezy proof image-first `docker compose pull && up` z realnymi obrazami z GHCR.
-- [ ] Uporzadkowac env/config contracts tak, zeby byly zgodne z kodem i README.
+  `dev-laptop`, `full-host` i `full-host + opensearch` sa juz swiezo zweryfikowane lokalnie przez build override, a image-first `docker compose pull && up` z realnymi obrazami z GHCR zostal domkniety 28 marca 2026 przez `ghcr-image-smoke` w runach `23680137422` oraz `23680408544`.
+- [x] Uporzadkowac env/config contracts tak, zeby byly zgodne z kodem i README.
   Status:
-  `dev-laptop` i `full-host` env keys dla SQL sa juz wyrownane do `ConnectionStrings__LawWatcherSqlServer`, a env files maja juz jawne `LAWWATCHER_*_IMAGE`. Nadal trzeba dowiezc finalny proof, ze README i GHCR naming zgadzaja sie z rzeczywistym workflow push.
+  `dev-laptop` i `full-host` env keys dla SQL sa juz wyrownane do `ConnectionStrings__LawWatcherSqlServer`, env files maja juz jawne `LAWWATCHER_*_IMAGE`, a README/GHCR naming zostaly potwierdzone swiezym green `publish-images` push run `23680137422` i `workflow_dispatch` run `23680408544` z 28 marca 2026.
 
 Exit criteria:
 
@@ -255,7 +255,7 @@ Pozostalo:
   `search_documents` maja juz jawnie opt-in cleanup przez `searchDocumentsRetentionHours` na `POST /v1/system/maintenance/retention`, oparty o `indexed_at_utc` zamiast ukrytego TTL.
 - [x] Odtworzyc Linux/Docker-first proof dla retention cleanup po usunieciu dawnego dedykowanego harnessu.
   Status:
-  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, a `ops/run-retention-smoke.sh --build-local` jest swiezo zielony dla cleanupu `ai_enrichment_tasks` oraz derived `document_artifacts`. Workflow `publish-images.yml` nadal ma image-first lane `ghcr-ops-proofs` na `workflow_dispatch` do osobnego proofu GHCR.
+  dedykowany shellowy smoke istnieje juz jako `ops/run-retention-smoke.sh`, a `ops/run-retention-smoke.sh --build-local` jest swiezo zielony dla cleanupu `ai_enrichment_tasks` oraz derived `document_artifacts`. Ten sam cleanup proof przeszedl tez image-first w `publish-images` workflow_dispatch run `23680408544` 28 marca 2026.
 - [x] Odtworzyc Linux/Docker-first structured-log proof dla kluczowych flow po usunieciu dawnego broker smoke lane.
   Status:
   dedykowany shellowy proof istnieje juz jako `ops/run-structured-log-proof.sh`, a `ops/run-structured-log-proof.sh --build-local` jest swiezo zielony dla `flow=ai`, `flow=document-ocr`, `flow=document-text-projection`, `flow=replay`, `flow=backfill` i `flow=profile-subscription`. Dedykowany `ops/run-signed-webhook-smoke.sh` pozostaje osobnym, weziej scoped proofem i nadal jest dopiety do workflow proof lanes.
