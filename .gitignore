@@ -13,6 +13,7 @@
 .publish-cache/
 output/
 test-results/
+TestResults/
 *.log
 artifacts/
 artifacts -v minimalbin/

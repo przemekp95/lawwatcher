@@ -8,7 +8,36 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  dotnet_validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore LawWatcher.slnx
+
+      - name: Build
+        run: dotnet build LawWatcher.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test LawWatcher.slnx -c Release --no-build --logger "trx;LogFileName=dotnet-test.trx" --results-directory test-results --collect:"XPlat Code Coverage"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: test-results
+          if-no-files-found: warn
+
   docker_contract:
+    needs: dotnet_validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

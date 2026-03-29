@@ -3,12 +3,15 @@
 This runbook covers incident response, recovery order, and safe operational actions.
 
 It does not restate the full runtime contract. For supported profiles, startup commands, environment examples, and
-API surface, use [README.md](../README.md).
+API surface, use [README.md](../README.md). For codebase shape and verification lanes, use
+[ARCHITECTURE.md](ARCHITECTURE.md) and [VERIFICATION.md](VERIFICATION.md).
 
 ## Scope
 
-- [README.md](../README.md) is the source of truth for supported runtime profiles, startup and stop commands,
-  Docker-first execution, environment examples, and endpoint capabilities.
+- [README.md](../README.md) is the entrypoint for the repo and points to the deeper technical docs.
+- [ARCHITECTURE.md](ARCHITECTURE.md) is the source of truth for bounded contexts, host responsibilities, and
+  transport or async boundaries.
+- [VERIFICATION.md](VERIFICATION.md) is the source of truth for standard test and smoke verification lanes.
 - This runbook is the source of truth for incident handling, recovery-safe proof selection, escalation evidence, and
   actions that are explicitly unsafe.
 - The supported operational contract is still Docker-first and host-OS-neutral: raw `docker compose` is the source

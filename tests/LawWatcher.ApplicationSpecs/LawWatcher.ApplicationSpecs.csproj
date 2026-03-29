@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Server\LawWatcher.Api\LawWatcher.Api.csproj" />
@@ -40,12 +40,21 @@
     <ProjectReference Include="..\..\src\Workers\LawWatcher.Worker.Lite\LawWatcher.Worker.Lite.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <IsTestProject>false</IsTestProject>
+    <IsTestProject>true</IsTestProject>
     <IsPackable>false</IsPackable>
     <!-- Serial project-reference evaluation avoids intermittent unresolved-reference failures in this spec host. -->
     <BuildInParallel>false</BuildInParallel>
