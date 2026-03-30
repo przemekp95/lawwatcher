@@ -27,8 +27,7 @@ Pick the smallest affected slice before you touch anything:
 
 - baseline runtime
 - AI runtime
-- full-host runtime
-- full-host with `OpenSearch`
+- production runtime
 - browser admin flow
 - broker delivery or projection refresh
 
@@ -42,10 +41,9 @@ bash ops/run-host-health-smoke.sh
 
 Then run the narrowest proof for the failing slice:
 
-- baseline Docker runtime: `bash ops/run-docker-dev-laptop-smoke.sh`
-- baseline Docker runtime with AI: `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
-- full-host runtime: `bash ops/run-docker-full-host-smoke.sh`
-- full-host runtime with hybrid/vector search: `bash ops/run-docker-full-host-smoke.sh --include-opensearch`
+- baseline Docker runtime: `bash ops/run-docker-dev-smoke.sh`
+- baseline Docker runtime with AI: `bash ops/run-docker-dev-smoke.sh --include-ai`
+- production runtime: `bash ops/run-docker-production-smoke.sh`
 - browser admin flow: `bash ops/run-operator-admin-smoke.sh`, then `bash ops/run-operator-admin-browser-smoke.sh`
 - signed webhook delivery: `bash ops/run-signed-webhook-smoke.sh`
 - retention lane: `bash ops/run-retention-smoke.sh`
@@ -143,7 +141,7 @@ state.
 Recommended sequence:
 
 1. Capture current diagnostics first.
-2. Prove the runtime is otherwise healthy with `bash ops/run-docker-full-host-smoke.sh`.
+2. Prove the runtime is otherwise healthy with `bash ops/run-docker-production-smoke.sh`.
 3. Only then issue the replay or backfill you actually mean to run.
 
 For endpoint details and supported auth surface, use [README.md](../README.md).
@@ -168,7 +166,7 @@ bash ops/ensure-docker-ollama-model.sh llama3.2:1b
 
 3. Re-run the smallest relevant proof:
 
-- `bash ops/run-docker-dev-laptop-smoke.sh --include-ai`
+- `bash ops/run-docker-dev-smoke.sh --include-ai`
 - `bash ops/run-act-ai-grounding-minio-smoke.sh`
 
 If the MinIO grounding proof is green but a user-facing answer is still poor, treat it as content or prompt quality

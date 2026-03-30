@@ -9,7 +9,7 @@ public sealed record LocalLlmExecutionPolicy(
     TimeSpan UnloadAfterIdle)
 {
     public static LocalLlmExecutionPolicy For(RuntimeProfile runtimeProfile) =>
-        runtimeProfile == RuntimeProfile.DevLaptop
+        runtimeProfile == RuntimeProfile.Dev
             ? new LocalLlmExecutionPolicy(
                 runtimeProfile,
                 AiActivationMode.OnDemand,

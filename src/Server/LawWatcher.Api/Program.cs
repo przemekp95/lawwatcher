@@ -27,9 +27,11 @@ using LawWatcher.TaxonomyAndProfiles.Application;
 using LawWatcher.TaxonomyAndProfiles.Infrastructure;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.OpenApi;
 using System.Security.Claims;
 using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,16 +52,19 @@ var sqlServerStorageConnectionString = ResolveSqlServerStorageConnectionString(s
 var rabbitMqConnectionString = ResolveRabbitMqConnectionString(builder.Configuration);
 var rabbitMqManagementSettings = ResolveRabbitMqManagementConnectionSettings(rabbitMqConnectionString);
 var runtimeOptions = builder.Configuration.GetSection("LawWatcher:Runtime").Get<LawWatcherRuntimeOptions>() ?? new LawWatcherRuntimeOptions();
+var runtimeProfile = RuntimeProfile.Parse(runtimeOptions.Profile);
 var localLlmOptions = builder.Configuration.GetSection("LawWatcher:LocalLlmWorker").Get<LocalLlmWorkerOptions>() ?? new LocalLlmWorkerOptions();
 var localEmbeddingOptions = builder.Configuration.GetSection("LawWatcher:LocalEmbedding").Get<LocalEmbeddingOptions>() ?? new LocalEmbeddingOptions();
 var ollamaOptions = builder.Configuration.GetSection("AI:Ollama").Get<OllamaOptions>() ?? new OllamaOptions();
 var openSearchOptions = builder.Configuration.GetSection("Search:OpenSearch").Get<OpenSearchOptions>() ?? new OpenSearchOptions();
 var hostHealthOptions = builder.Configuration.GetSection("LawWatcher:Health").Get<HostHealthOptions>() ?? new HostHealthOptions();
+var bootstrapOptions = builder.Configuration.GetSection("LawWatcher:Bootstrap").Get<BootstrapOptions>() ?? new BootstrapOptions();
+var enableConfiguredBootstrap = ConfiguredBootstrapHostedServicesPolicy.ShouldRegister(runtimeProfile, bootstrapOptions);
 var searchInfrastructureCapabilities = new SearchInfrastructureCapabilities(
     SupportsSqlFullText: DetermineSqlServerFullTextAvailability(stateStorageOptions, sqlServerStorageConnectionString),
     SupportsHybridSearch: DetermineOpenSearchAvailability(runtimeOptions, openSearchOptions, localEmbeddingOptions, ollamaOptions));
 var effectiveSearchCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
-    SystemCapabilities.FromOptions(RuntimeProfile.Parse(runtimeOptions.Profile), runtimeOptions.Capabilities).Search,
+    SystemCapabilities.FromOptions(runtimeProfile, runtimeOptions.Capabilities).Search,
     searchInfrastructureCapabilities);
 var aiInfrastructureCapabilities = new AiInfrastructureCapabilities(
     SupportsConfiguredLocalLlm: DetermineOllamaModelAvailability(runtimeOptions, localLlmOptions, ollamaOptions));
@@ -82,6 +87,34 @@ builder.Services
     .PersistKeysToFileSystem(dataProtectionKeysDirectory);
 
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi("integration-v1", options =>
+{
+    options.ShouldInclude = description => string.Equals(description.GroupName, "integration", StringComparison.Ordinal);
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>(StringComparer.Ordinal);
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "opaque",
+            Name = "Authorization",
+            In = ParameterLocation.Header,
+            Description = "Opaque bearer token issued to a LawWatcher API client."
+        };
+
+        document.Security ??= [];
+        document.Security.Add(
+            new OpenApiSecurityRequirement
+            {
+                [
+                    new OpenApiSecuritySchemeReference("Bearer", document, null)
+                ] = []
+            });
+        return Task.CompletedTask;
+    });
+});
 builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name = "lawwatcher.api.csrf";
@@ -115,7 +148,7 @@ builder.Services.Configure<LawWatcherRuntimeOptions>(builder.Configuration.GetSe
 builder.Services.Configure<StateStorageOptions>(builder.Configuration.GetSection("LawWatcher:Storage"));
 builder.Services.Configure<HostHealthOptions>(builder.Configuration.GetSection("LawWatcher:Health"));
 builder.Services.Configure<WebhookDeliveryOptions>(builder.Configuration.GetSection("LawWatcher:Webhooks"));
-builder.Services.Configure<SeedDataOptions>(builder.Configuration.GetSection("LawWatcher:SeedData"));
+builder.Services.Configure<BootstrapOptions>(builder.Configuration.GetSection("LawWatcher:Bootstrap"));
 builder.Services.Configure<ObjectStorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.Configure<LocalLlmWorkerOptions>(builder.Configuration.GetSection("LawWatcher:LocalLlmWorker"));
 builder.Services.Configure<LocalEmbeddingOptions>(builder.Configuration.GetSection("LawWatcher:LocalEmbedding"));
@@ -230,6 +263,7 @@ builder.Services.AddSingleton<IApiTokenFingerprintService, Sha256ApiTokenFingerp
 builder.Services.AddSingleton<ApiClientsCommandService>();
 builder.Services.AddSingleton<ApiClientsQueryService>();
 builder.Services.AddSingleton<ApiClientAccessService>();
+builder.Services.AddSingleton<ProductBootstrapService>();
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerOperatorAccountProjectionStore>(_ => new SqlServerOperatorAccountProjectionStore(sqlServerStorageConnectionString));
@@ -320,7 +354,10 @@ else
 }
 builder.Services.AddSingleton<LegislativeIntakeCommandService>();
 builder.Services.AddSingleton<BillsQueryService>();
-builder.Services.AddHostedService<LegislativeIntakeBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<LegislativeIntakeBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerLegislativeProcessProjectionStore>(_ => new SqlServerLegislativeProcessProjectionStore(sqlServerStorageConnectionString));
@@ -339,7 +376,10 @@ else
 }
 builder.Services.AddSingleton<LegislativeProcessCommandService>();
 builder.Services.AddSingleton<ProcessesQueryService>();
-builder.Services.AddHostedService<LegislativeProcessBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<LegislativeProcessBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerPublishedActProjectionStore>(_ => new SqlServerPublishedActProjectionStore(sqlServerStorageConnectionString));
@@ -358,7 +398,10 @@ else
 }
 builder.Services.AddSingleton<LegalCorpusCommandService>();
 builder.Services.AddSingleton<ActsQueryService>();
-builder.Services.AddHostedService<LegalCorpusBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<LegalCorpusBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerMonitoringProfileProjectionStore>(_ => new SqlServerMonitoringProfileProjectionStore(sqlServerStorageConnectionString));
@@ -375,7 +418,10 @@ else
 }
 builder.Services.AddSingleton<MonitoringProfilesCommandService>();
 builder.Services.AddSingleton<MonitoringProfilesQueryService>();
-builder.Services.AddHostedService<MonitoringProfilesBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<MonitoringProfilesBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerProfileSubscriptionProjectionStore>(_ => new SqlServerProfileSubscriptionProjectionStore(sqlServerStorageConnectionString));
@@ -396,7 +442,10 @@ builder.Services.AddSingleton<INotificationSubscriptionReadRepository>(servicePr
     new ProfileSubscriptionNotificationReadRepositoryAdapter(serviceProvider.GetRequiredService<IProfileSubscriptionReadRepository>()));
 builder.Services.AddSingleton<ProfileSubscriptionsCommandService>();
 builder.Services.AddSingleton<ProfileSubscriptionsQueryService>();
-builder.Services.AddHostedService<ProfileSubscriptionsBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<ProfileSubscriptionsBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerWebhookRegistrationProjectionStore>(_ => new SqlServerWebhookRegistrationProjectionStore(sqlServerStorageConnectionString));
@@ -425,7 +474,10 @@ builder.Services.AddSingleton<WebhookRegistrationsCommandService>();
 builder.Services.AddSingleton<WebhookRegistrationsQueryService>();
 builder.Services.AddSingleton<AlertWebhookDispatchService>();
 builder.Services.AddSingleton<WebhookEventDispatchesQueryService>();
-builder.Services.AddHostedService<WebhookRegistrationsBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<WebhookRegistrationsBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerBackfillRequestProjectionStore>(_ => new SqlServerBackfillRequestProjectionStore(sqlServerStorageConnectionString));
@@ -446,7 +498,10 @@ builder.Services.AddSingleton<BackfillRequestsCommandService>();
 builder.Services.AddSingleton<BackfillExecutionService>();
 builder.Services.AddSingleton<BackfillQueueProcessor>();
 builder.Services.AddSingleton<BackfillRequestsQueryService>();
-builder.Services.AddHostedService<BackfillRequestsBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<BackfillRequestsBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerReplayRequestProjectionStore>(_ => new SqlServerReplayRequestProjectionStore(sqlServerStorageConnectionString));
@@ -467,7 +522,10 @@ builder.Services.AddSingleton<ReplayRequestsCommandService>();
 builder.Services.AddSingleton<ReplayExecutionService>();
 builder.Services.AddSingleton<ReplayQueueProcessor>();
 builder.Services.AddSingleton<ReplayRequestsQueryService>();
-builder.Services.AddHostedService<ReplayRequestsBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<ReplayRequestsBootstrapHostedService>();
+}
 if (sqlServerStorageConnectionString is not null)
 {
     builder.Services.AddSingleton<SqlServerBillAlertProjectionStore>(_ => new SqlServerBillAlertProjectionStore(sqlServerStorageConnectionString));
@@ -543,9 +601,12 @@ builder.Services.AddSingleton<IWebhookDispatcher>(serviceProvider => WebhookDisp
     serviceProvider.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<SearchIndexingService>();
 builder.Services.AddSingleton<SearchQueryService>();
-builder.Services.AddHostedService<ApiClientsBootstrapHostedService>();
-builder.Services.AddHostedService<OperatorAccountsBootstrapHostedService>();
-builder.Services.AddHostedService<AiEnrichmentBootstrapHostedService>();
+if (enableConfiguredBootstrap)
+{
+    builder.Services.AddHostedService<ApiClientsBootstrapHostedService>();
+    builder.Services.AddHostedService<OperatorAccountsBootstrapHostedService>();
+    builder.Services.AddHostedService<AiEnrichmentBootstrapHostedService>();
+}
 
 var app = builder.Build();
 
@@ -557,6 +618,7 @@ if (ShouldUseHttpsRedirection(builder.Configuration))
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+app.MapOpenApi("/openapi/{documentName}.json");
 app.MapGet(hostHealthOptions.LivePath, async (HttpContext context, HealthCheckService healthCheckService) =>
 {
     await LawWatcherHealthResponseWriter.WriteAsync(

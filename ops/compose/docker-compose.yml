@@ -19,6 +19,7 @@ services:
       SQLSERVER_HOST: sqlserver
       SQLSERVER_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
       SQLSERVER_DATABASE: ${SQLSERVER_DATABASE:-LawWatcher}
+      LAWWATCHER_PRODUCT_VERSION: ${LAWWATCHER_PRODUCT_VERSION:-dev-local}
     depends_on:
       - sqlserver
     volumes:
@@ -29,6 +30,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management
+    user: "0:0"
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
@@ -77,9 +79,17 @@ services:
       AI__OLLAMA__BASEURL: ${AI__OLLAMA__BASEURL}
       AI__OLLAMA__KEEPALIVE: ${AI__OLLAMA__KEEPALIVE}
       LawWatcher__LocalEmbedding__DefaultModel: ${AI__OLLAMA__EMBEDDINGMODEL}
-      LawWatcher__SeedData__EnableWebhookSubscriptionSeed: ${LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED:-true}
-      LawWatcher__SeedData__EnableDefaultOperatorSeed: ${LAWWATCHER__SEEDDATA__ENABLEDEFAULTOPERATORSEED:-false}
-      LawWatcher__SeedData__EnableDefaultApiClientSeed: ${LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED:-false}
+      LawWatcher__Bootstrap__Secret: ${LAWWATCHER__BOOTSTRAP__SECRET:-}
+      LawWatcher__Bootstrap__EnableDemoData: ${LAWWATCHER__BOOTSTRAP__ENABLEDEMODATA:-true}
+      LawWatcher__Bootstrap__EnableInitialOperator: ${LAWWATCHER__BOOTSTRAP__ENABLEINITIALOPERATOR:-false}
+      LawWatcher__Bootstrap__InitialOperatorEmail: ${LAWWATCHER__BOOTSTRAP__INITIALOPERATOREMAIL:-}
+      LawWatcher__Bootstrap__InitialOperatorDisplayName: ${LAWWATCHER__BOOTSTRAP__INITIALOPERATORDISPLAYNAME:-}
+      LawWatcher__Bootstrap__InitialOperatorPassword: ${LAWWATCHER__BOOTSTRAP__INITIALOPERATORPASSWORD:-}
+      LawWatcher__Bootstrap__EnableInitialApiClient: ${LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT:-false}
+      LawWatcher__Bootstrap__InitialApiClientName: ${LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME:-}
+      LawWatcher__Bootstrap__InitialApiClientIdentifier: ${LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER:-}
+      LawWatcher__Bootstrap__InitialApiClientToken: ${LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN:-}
+      LawWatcher__Bootstrap__InitialApiClientScopesCsv: ${LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV:-}
       LawWatcher__Webhooks__Backend: ${LAWWATCHER__WEBHOOKS__BACKEND:-}
       LawWatcher__Webhooks__SigningSecret: ${LAWWATCHER__WEBHOOKS__SIGNINGSECRET:-}
     ports:
@@ -106,7 +116,7 @@ services:
       - api
 
   worker-lite:
-    image: ${LAWWATCHER_WORKER_LITE_IMAGE}
+    image: ${LAWWATCHER_WORKER_LITE_IMAGE:-ghcr.io/przemekp95/lawwatcher-worker-lite:latest}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -140,7 +150,7 @@ services:
     image: ollama/ollama:latest
     profiles:
       - ai
-      - full-host
+      - production
     environment:
       OLLAMA_HOST: ${AI__OLLAMA__HOST:-0.0.0.0:11434}
       OLLAMA_KEEP_ALIVE: ${AI__OLLAMA__KEEPALIVE}

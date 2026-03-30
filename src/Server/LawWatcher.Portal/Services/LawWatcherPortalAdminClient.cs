@@ -16,6 +16,7 @@ public sealed class PortalAdminApiException(string message, int statusCode) : In
 public sealed class LawWatcherPortalAdminClient : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string BootstrapSecretHeaderName = "X-LawWatcher-Bootstrap-Secret";
 
     private readonly HttpClientHandler _handler;
     private readonly HttpClient _httpClient;
@@ -50,6 +51,42 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
         SessionChanged?.Invoke();
         return CurrentSession;
     }
+
+    public Task<BootstrapStatusResponse> GetBootstrapStatusAsync(CancellationToken cancellationToken) =>
+        SendAsync<BootstrapStatusResponse>(
+            HttpMethod.Get,
+            "v1/bootstrap/status",
+            cancellationToken: cancellationToken);
+
+    public async Task<OperatorSessionResponse> BootstrapFirstOperatorAsync(
+        BootstrapOperatorRequest request,
+        string bootstrapSecret,
+        CancellationToken cancellationToken)
+    {
+        CurrentSession = await SendAsync<OperatorSessionResponse>(
+            HttpMethod.Post,
+            "v1/bootstrap/operator",
+            request,
+            additionalHeaders: new Dictionary<string, string>
+            {
+                [BootstrapSecretHeaderName] = bootstrapSecret
+            },
+            cancellationToken: cancellationToken);
+
+        _csrfRequestToken = CurrentSession.CsrfRequestToken;
+        SessionChanged?.Invoke();
+        return CurrentSession;
+    }
+
+    public Task<BootstrapApiClientResponse> BootstrapInitialApiClientAsync(
+        BootstrapApiClientRequest request,
+        CancellationToken cancellationToken) =>
+        SendAsync<BootstrapApiClientResponse>(
+            HttpMethod.Post,
+            "v1/bootstrap/api-client",
+            request,
+            requireAntiforgery: true,
+            cancellationToken: cancellationToken);
 
     public async Task<OperatorSessionResponse> LoginAsync(string email, string password, CancellationToken cancellationToken)
     {
@@ -124,7 +161,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     {
         var profiles = await SendAsync<List<MonitoringProfileResponse>>(
             HttpMethod.Get,
-            "v1/profiles",
+            "v1/admin/profiles",
             cancellationToken: cancellationToken);
         return profiles
             .OrderBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase)
@@ -134,7 +171,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> CreateProfileAsync(CreateMonitoringProfileRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Post,
-            "v1/profiles",
+            "v1/admin/profiles",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -142,7 +179,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> AddProfileRuleAsync(Guid profileId, AddMonitoringProfileRuleRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Post,
-            $"v1/profiles/{profileId:D}/rules",
+            $"v1/admin/profiles/{profileId:D}/rules",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -150,7 +187,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> ChangeProfileAlertPolicyAsync(Guid profileId, ChangeMonitoringProfileAlertPolicyRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Patch,
-            $"v1/profiles/{profileId:D}/alert-policy",
+            $"v1/admin/profiles/{profileId:D}/alert-policy",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -158,7 +195,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> DeactivateProfileAsync(Guid profileId, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Delete,
-            $"v1/profiles/{profileId:D}",
+            $"v1/admin/profiles/{profileId:D}",
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
 
@@ -166,7 +203,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     {
         var subscriptions = await SendAsync<List<ProfileSubscriptionResponse>>(
             HttpMethod.Get,
-            "v1/subscriptions",
+            "v1/admin/subscriptions",
             cancellationToken: cancellationToken);
         return subscriptions
             .OrderBy(subscription => subscription.ProfileName, StringComparer.OrdinalIgnoreCase)
@@ -177,7 +214,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> CreateSubscriptionAsync(CreateProfileSubscriptionRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Post,
-            "v1/subscriptions",
+            "v1/admin/subscriptions",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -185,7 +222,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> ChangeSubscriptionAlertPolicyAsync(Guid subscriptionId, ChangeProfileSubscriptionAlertPolicyRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Patch,
-            $"v1/subscriptions/{subscriptionId:D}/alert-policy",
+            $"v1/admin/subscriptions/{subscriptionId:D}/alert-policy",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -193,7 +230,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> DeactivateSubscriptionAsync(Guid subscriptionId, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Delete,
-            $"v1/subscriptions/{subscriptionId:D}",
+            $"v1/admin/subscriptions/{subscriptionId:D}",
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
 
@@ -201,7 +238,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     {
         var webhooks = await SendAsync<List<WebhookRegistrationResponse>>(
             HttpMethod.Get,
-            "v1/webhooks",
+            "v1/admin/webhooks",
             cancellationToken: cancellationToken);
         return webhooks
             .OrderByDescending(webhook => webhook.IsActive)
@@ -212,7 +249,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> CreateWebhookAsync(CreateWebhookRegistrationRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Post,
-            "v1/webhooks",
+            "v1/admin/webhooks",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -220,7 +257,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> UpdateWebhookAsync(Guid webhookId, UpdateWebhookRegistrationRequest request, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Patch,
-            $"v1/webhooks/{webhookId:D}",
+            $"v1/admin/webhooks/{webhookId:D}",
             request,
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
@@ -228,7 +265,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
     public Task<AcceptedCommandResponse> DeactivateWebhookAsync(Guid webhookId, CancellationToken cancellationToken) =>
         SendAsync<AcceptedCommandResponse>(
             HttpMethod.Delete,
-            $"v1/webhooks/{webhookId:D}",
+            $"v1/admin/webhooks/{webhookId:D}",
             requireAntiforgery: true,
             cancellationToken: cancellationToken);
 
@@ -282,6 +319,7 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
         string relativePath,
         object? payload = null,
         bool requireAntiforgery = false,
+        IReadOnlyDictionary<string, string>? additionalHeaders = null,
         CancellationToken cancellationToken = default)
     {
         if (requireAntiforgery)
@@ -293,6 +331,14 @@ public sealed class LawWatcherPortalAdminClient : IDisposable
         if (requireAntiforgery && !string.IsNullOrWhiteSpace(_csrfRequestToken))
         {
             request.Headers.TryAddWithoutValidation("X-LawWatcher-CSRF", _csrfRequestToken);
+        }
+
+        if (additionalHeaders is not null)
+        {
+            foreach (var pair in additionalHeaders)
+            {
+                request.Headers.TryAddWithoutValidation(pair.Key, pair.Value);
+            }
         }
 
         if (payload is not null)

@@ -29,7 +29,7 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-signed-webhook-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 listener_script="${tmp_dir}/signed-webhook-listener.js"
 capture_path="${tmp_dir}/captured-webhooks.json"
 summary_path="${repo_root}/output/smoke/signed-webhook-summary.json"
@@ -48,7 +48,7 @@ worker_lite_health_port="$(get_free_port)"
 listener_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "$env_file" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -59,8 +59,11 @@ write_env_file_from_example \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
   "WORKERS__LITE__MAXCONCURRENCY=1" \
-  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write" \
   "LAWWATCHER__WEBHOOKS__BACKEND=SignedHttp" \
   "LAWWATCHER__WEBHOOKS__SIGNINGSECRET=${signing_secret}"
 
@@ -135,6 +138,7 @@ else
   docker "${compose_args[@]}" up -d >/dev/null
 fi
 
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
 wait_http_ok "http://127.0.0.1:${api_port}/v1/alerts" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_lite_health_port}/health/ready" >/dev/null
 

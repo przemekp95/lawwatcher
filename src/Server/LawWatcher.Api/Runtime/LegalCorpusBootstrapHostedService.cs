@@ -1,11 +1,14 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.LegalCorpus.Application;
 using LawWatcher.LegislativeIntake.Application;
 using LawWatcher.BuildingBlocks.Ports;
 using System.Text;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class LegalCorpusBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     ActsQueryService actsQueryService,
     BillsQueryService billsQueryService,
     IDocumentStore documentStore,
@@ -13,6 +16,11 @@ public sealed class LegalCorpusBootstrapHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         await StoreSeedArtifactAsync(
             documentStore,
             "acts/DU/2026/501/text.txt",

@@ -30,7 +30,7 @@ cd "$repo_root"
 
 tmp_dir="${repo_root}/output/playwright/tmp-admin-browser-$(random_suffix)"
 project_name="lawwatcher-admin-browser-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 test_file="${tmp_dir}/operator-admin-browser.spec.js"
 summary_path="${repo_root}/output/playwright/operator-admin-browser-summary.json"
 authenticated_screenshot="${repo_root}/output/playwright/admin-authenticated.png"
@@ -48,7 +48,7 @@ minio_console_port="$(get_free_port)"
 worker_lite_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "$env_file" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -58,8 +58,10 @@ write_env_file_from_example \
   "MINIO_API_PORT=${minio_api_port}" \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
-  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTOPERATORSEED=true"
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALOPERATOR=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATOREMAIL=admin@lawwatcher.local" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATORDISPLAYNAME=Local Admin" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATORPASSWORD=Admin123!"
 
 compose_args=(
   compose
@@ -85,7 +87,7 @@ else
   docker "${compose_args[@]}" up -d >/dev/null
 fi
 
-wait_http_ok "http://127.0.0.1:${api_port}/v1/system/capabilities" >/dev/null
+wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${portal_port}/admin" >/dev/null
 npx -y -p @playwright/test playwright --version >/dev/null
 playwright_test_node_path="$(resolve_npx_package_node_path "@playwright/test")"

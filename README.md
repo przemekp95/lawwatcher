@@ -1,57 +1,66 @@
 # LawWatcher
 
-LawWatcher is an on-prem, single-tenant modular monolith for legislative monitoring. The repo is aimed at backend/platform review: bounded contexts, explicit async flows, browser-safe admin auth, and Docker-first operational verification.
+LawWatcher is a private, on-prem, single-tenant legislative monitoring platform. The supported product contract is a self-hosted `production` bundle backed by versioned GHCR images, Docker Compose, SQL Server, RabbitMQ, MinIO, Ollama, and OpenSearch.
 
-## What This Repo Demonstrates
+## Product Contract
 
-- modular monolith boundaries with domain/application/contracts/infrastructure slices
-- browser admin flow with cookie auth plus CSRF, separate from bearer-only machine-to-machine APIs
-- async processing through workers, outbox/inbox persistence, webhook delivery, and broker-backed execution
-- Docker-first runtime verification for baseline, AI, and full-host profiles
+- `production`: the only supported installable product
+- `dev`: a developer profile for local work, explicitly not supported as a product install
+- operator/browser surface: cookie auth + CSRF
+- integration surface: bearer-authenticated reads and writes, plus signed webhooks
 
-## Evaluator Path
+## Quick Start
 
 Prerequisites:
 
-- .NET SDK `10.0.201`
 - Docker with Compose
 - `bash`
-- Node.js for browser/smoke tooling
+- access to the GHCR images for the release you want to install
 
-Fast validation:
+Production install:
+
+```bash
+bash ops/validate-production-env.sh --env-file ops/env/production.env.example
+bash ops/run-docker-production.sh --env-file ops/env/production.env.example
+```
+
+First-run bootstrap:
+
+- open `/admin`
+- create the first operator with `LAWWATCHER__BOOTSTRAP__SECRET`
+- optionally create the first API client from the bootstrap section with `integration:read` and any required write scopes
+
+Developer runtime:
+
+```bash
+bash ops/run-docker-dev.sh --env-file ops/env/dev.env.example
+```
+
+Baseline verification:
 
 ```bash
 dotnet build LawWatcher.slnx -c Release
 dotnet test LawWatcher.slnx -c Release --collect:"XPlat Code Coverage"
 ```
 
-Optional runtime proof:
+Windows note:
 
-```bash
-bash ops/run-docker-dev-laptop-smoke.sh --build-local
-```
+- if the repo lives under `Downloads` and Windows Code Integrity interferes with `dotnet test`, run `powershell -File ops/run-local-verification.ps1`
 
 ## Docs
 
+- [Install](docs/INSTALL.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Backup And Restore](docs/BACKUP-RESTORE.md)
+- [Upgrades](docs/UPGRADES.md)
+- [Support](docs/SUPPORT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Verification](docs/VERIFICATION.md)
 - [Runbook](docs/RUNBOOK.md)
 
-## Repo Layout
-
-```text
-.
-|-- docs/
-|-- ops/
-|-- src/
-|-- tests/
-|-- .github/workflows/
-|-- Directory.Build.props
-|-- global.json
-`-- LawWatcher.slnx
-```
-
 ## Notes
 
-- Production-facing HTTP and async contracts under `/v1/**` are intentionally unchanged by the repo cleanup work.
-- Heavy operational and smoke details live in the linked docs instead of this entrypoint.
+- The supported production bundle uses the full platform topology with `Api`, `Portal`, dedicated workers, `Ollama`, and `OpenSearch`.
+- Default demo seeds are not part of the supported product contract.
+- The machine-readable integration contract is exposed from the API host at `/openapi/integration-v1.json`.
+- Integration `GET` endpoints require `Authorization: Bearer <token>` with the canonical `integration:read` scope.

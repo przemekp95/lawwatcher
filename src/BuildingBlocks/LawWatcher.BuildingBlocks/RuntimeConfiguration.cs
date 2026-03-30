@@ -5,15 +5,15 @@ namespace LawWatcher.BuildingBlocks.Configuration;
 
 public readonly record struct RuntimeProfile(string Value)
 {
-    public static RuntimeProfile DevLaptop => new("dev-laptop");
+    public static RuntimeProfile Dev => new("dev");
 
-    public static RuntimeProfile FullHost => new("full-host");
+    public static RuntimeProfile Production => new("production");
 
     public static RuntimeProfile Parse(string value) =>
         value.Trim().ToLowerInvariant() switch
         {
-            "dev-laptop" => DevLaptop,
-            "full-host" => FullHost,
+            "dev" => Dev,
+            "production" => Production,
             _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unsupported runtime profile.")
         };
 
@@ -37,7 +37,7 @@ public sealed class CapabilityOptions
 
 public sealed class LawWatcherRuntimeOptions
 {
-    public string Profile { get; init; } = RuntimeProfile.DevLaptop.Value;
+    public string Profile { get; init; } = RuntimeProfile.Dev.Value;
 
     public CapabilityOptions Capabilities { get; init; } = new()
     {
@@ -185,7 +185,8 @@ public sealed record SystemCapabilities(
 {
     public static SystemCapabilities FromOptions(RuntimeProfile runtimeProfile, CapabilityOptions options)
     {
-        var aiCapabilities = runtimeProfile == RuntimeProfile.DevLaptop
+        var isDevRuntime = runtimeProfile == RuntimeProfile.Dev;
+        var aiCapabilities = isDevRuntime
             ? new AiCapabilities(
                 options.Ai,
                 options.Ai ? AiActivationMode.OnDemand : AiActivationMode.Disabled,
@@ -197,7 +198,7 @@ public sealed record SystemCapabilities(
                 options.Ai ? 2 : 0,
                 options.Ai ? TimeSpan.FromMinutes(10) : TimeSpan.Zero);
 
-        var searchCapabilities = runtimeProfile == RuntimeProfile.DevLaptop
+        var searchCapabilities = isDevRuntime
             ? new SearchCapabilities(
                 UseSqlFullText: options.SqlFullText,
                 UseHybridSearch: false,

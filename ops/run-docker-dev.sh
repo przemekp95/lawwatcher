@@ -11,9 +11,14 @@ require_cmd docker
 include_ai=false
 build_local=false
 ai_model="llama3.2:1b"
+env_file="ops/env/dev.env.example"
 
 while (($# > 0)); do
   case "$1" in
+    --env-file)
+      env_file="$2"
+      shift 2
+      ;;
     --include-ai)
       include_ai=true
       shift
@@ -38,7 +43,7 @@ cd "$repo_root"
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  --env-file ops/env/dev-laptop.env.example
+  --env-file "$env_file"
 )
 
 if [[ "$build_local" == "true" ]]; then

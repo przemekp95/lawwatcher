@@ -1,55 +1,66 @@
 # LawWatcher Verification
 
-This document is the source of truth for standard developer verification and how it relates to the heavier operational proof lanes.
+This document is the source of truth for repo health, product contract validation, and release-level verification.
 
-## Standard Validation Lane
+## Baseline Repo Gate
 
-Use this first for local development and for candidate-facing repo evaluation:
+Run this first for any code change:
 
 ```bash
 dotnet build LawWatcher.slnx -c Release
 dotnet test LawWatcher.slnx -c Release --collect:"XPlat Code Coverage"
 ```
 
-This is the default repo health signal. It should stay green without requiring a full Docker runtime.
+This is the minimum signal that the repo is healthy.
 
-## PR-Gated Validation
+On Windows hosts where the repo lives under `Downloads`, prefer:
 
-The fast PR gate lives in `.github/workflows/docker-smoke.yml` and should cover:
+```powershell
+powershell -File ops/run-local-verification.ps1
+```
 
-- Docker contract validation
-- .NET restore/build/test validation with TRX and coverage artifacts
-- baseline Docker smoke
-- AI Docker smoke
-- host health smoke
+That wrapper mirrors the repo to a clean temp workspace outside `Downloads`, excludes runtime artifacts, uses a stable single-node build lane, and then runs the same `build` plus `test` contract there.
 
-These lanes are the main confidence path for pull requests.
+## Runtime Contract Gates
 
-## Heavier Operational Proofs
+- `dev` contract:
 
-The repo also keeps broader smoke and ops proofs for runtime confidence. These remain useful, but they are a second-level signal rather than the default entrypoint for understanding repo quality.
+```bash
+bash ops/run-docker-dev-smoke.sh --env-file ops/env/dev.env.example
+```
 
-Examples:
+- `production` contract:
 
-- `bash ops/run-docker-dev-laptop-smoke.sh --build-local`
-- `bash ops/run-docker-dev-laptop-smoke.sh --build-local --include-ai`
-- `bash ops/run-docker-full-host-smoke.sh --build-local --include-opensearch`
-- `bash ops/run-host-health-smoke.sh --build-local`
-- `bash ops/run-operator-admin-smoke.sh --build-local`
-- `bash ops/run-operator-admin-browser-smoke.sh --build-local`
-- `bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh --build-local`
-- `bash ops/run-retention-smoke.sh --build-local`
-- `bash ops/run-signed-webhook-smoke.sh --build-local`
-- `bash ops/run-structured-log-proof.sh --build-local`
+```bash
+bash ops/validate-production-env.sh --env-file ops/env/production.env.example
+bash ops/run-docker-production-smoke.sh --env-file ops/env/production.env.example
+```
 
-## Coverage and Test Strategy
+The supported production gate requires the full platform with AI, OCR, and OpenSearch enabled.
 
-- Architecture rules are enforced through automated tests.
-- Application behavior is covered by executable scenario-style tests running under `dotnet test`.
-- Docker smoke scripts remain the runtime contract proof for health, broker paths, browser admin flow, and full-host topology.
-- Coverage is collected and published, but there is currently no hard coverage threshold gate.
+The smoke lanes assume the frozen `1.x` integration contract:
 
-## Environment Notes
+- integration `GET` endpoints are bearer-gated
+- the canonical integration read scope is `integration:read`
+- operator/browser flows remain cookie + CSRF
 
-- If Windows host policy blocks assemblies from a downloaded workspace, confirm the same `dotnet test` lane in CI or from a non-blocked local path before treating it as a repo defect.
-- Docker-first scripts remain supported and should continue writing summaries under `output/`.
+## Release Validation
+
+- Versioned GHCR images are validated through `.github/workflows/publish-images.yml`.
+- Release bundle generation runs from the same workflow on SemVer tags.
+- Image-first verification is expected to exercise:
+  - dev contract
+  - dev contract with AI
+  - production contract
+
+## Additional Operational Proofs
+
+The repo also keeps deeper proof scripts for runtime confidence:
+
+- `bash ops/run-rabbitmq-write-path-nonblocking-smoke.sh`
+- `bash ops/run-retention-smoke.sh`
+- `bash ops/run-signed-webhook-smoke.sh`
+- `bash ops/run-structured-log-proof.sh`
+- `bash ops/run-poison-dlq-recovery-smoke.sh`
+
+These remain important, but they are second-level proofs after the baseline and product contract gates.

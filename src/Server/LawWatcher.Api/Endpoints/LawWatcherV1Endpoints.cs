@@ -4,8 +4,10 @@ using Microsoft.AspNetCore.Authentication;
 using LawWatcher.Api.Runtime;
 using LawWatcher.AiEnrichment.Application;
 using LawWatcher.AiEnrichment.Contracts;
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.IdentityAndAccess.Application;
 using LawWatcher.IdentityAndAccess.Contracts;
+using LawWatcher.IdentityAndAccess.Domain.ApiClients;
 using LawWatcher.IntegrationApi.Application;
 using LawWatcher.IntegrationApi.Contracts;
 using LawWatcher.IntegrationApi.Domain.Backfills;
@@ -19,25 +21,157 @@ using LawWatcher.TaxonomyAndProfiles.Application;
 using LawWatcher.TaxonomyAndProfiles.Contracts;
 using LawWatcher.TaxonomyAndProfiles.Domain.MonitoringProfiles;
 using LawWatcher.TaxonomyAndProfiles.Domain.Subscriptions;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Endpoints;
 
 public static class LawWatcherV1Endpoints
 {
+    private const string BootstrapSecretHeaderName = "X-LawWatcher-Bootstrap-Secret";
+    private const string IntegrationReadScope = ApiClientScopeCatalog.IntegrationRead;
+
     public static IEndpointRouteBuilder MapLawWatcherV1Endpoints(this IEndpointRouteBuilder app)
     {
         var v1 = app.MapGroup("/v1");
+        var integration = v1.MapGroup(string.Empty).WithGroupName("integration");
+        var internalControl = v1.MapGroup(string.Empty);
+        var admin = internalControl.MapGroup("/admin");
 
-        v1.MapGet("/system/capabilities", (ISystemCapabilitiesProvider provider) =>
-            TypedResults.Ok(SystemCapabilitiesResponseFactory.Create(provider.Current)));
+        integration.MapGet("/system/capabilities", async (
+            HttpContext httpContext,
+            ISystemCapabilitiesProvider provider,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(
+                httpContext,
+                accessService,
+                IntegrationReadScope,
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
 
-        v1.MapGet("/search", async (string? q, ISystemCapabilitiesProvider provider, SearchQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(SystemCapabilitiesResponseFactory.CreateSearchResponse(
+            return TypedResults.Ok(SystemCapabilitiesResponseFactory.Create(provider.Current));
+        });
+
+        integration.MapGet("/search", async (
+            HttpContext httpContext,
+            string? q,
+            ISystemCapabilitiesProvider provider,
+            SearchQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(
+                httpContext,
+                accessService,
+                IntegrationReadScope,
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(SystemCapabilitiesResponseFactory.CreateSearchResponse(
                 await queryService.SearchAsync(q ?? string.Empty, cancellationToken),
-                provider.Current)));
-        v1.MapGet("/ai/tasks", async (AiEnrichmentTasksQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetTasksAsync(cancellationToken)));
-        v1.MapGet("/operator/session", async (
+                provider.Current));
+        });
+        integration.MapGet("/ai/tasks", async (
+            HttpContext httpContext,
+            AiEnrichmentTasksQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(
+                httpContext,
+                accessService,
+                IntegrationReadScope,
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetTasksAsync(cancellationToken));
+        });
+        internalControl.MapGet("/bootstrap/status", async (
+            ProductBootstrapService bootstrapService,
+            CancellationToken cancellationToken) =>
+        {
+            return TypedResults.Ok(await bootstrapService.GetStatusAsync(cancellationToken));
+        });
+        internalControl.MapPost("/bootstrap/operator", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            BootstrapOperatorRequest request,
+            IOptions<BootstrapOptions> bootstrapOptions,
+            ProductBootstrapService bootstrapService,
+            CancellationToken cancellationToken) =>
+        {
+            var bootstrapSecretValidation = ValidateBootstrapSecret(httpContext.Request, bootstrapOptions.Value);
+            if (bootstrapSecretValidation is not null)
+            {
+                return bootstrapSecretValidation;
+            }
+
+            var status = await bootstrapService.GetStatusAsync(cancellationToken);
+            if (!status.RequiresOperatorBootstrap)
+            {
+                return TypedResults.Problem(
+                    title: "Bootstrap unavailable",
+                    detail: "The first operator has already been created for this environment.",
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            var @operator = await bootstrapService.BootstrapFirstOperatorAsync(request, cancellationToken);
+            await httpContext.SignInAsync(
+                OperatorCookieAuthenticationDefaults.Scheme,
+                CreateOperatorPrincipal(
+                    @operator.Id,
+                    @operator.Email,
+                    @operator.DisplayName,
+                    @operator.Permissions),
+                new AuthenticationProperties
+                {
+                    IsPersistent = true,
+                    AllowRefresh = true
+                });
+
+            var tokens = antiforgery.GetAndStoreTokens(httpContext);
+            return TypedResults.Ok(new OperatorSessionResponse(
+                true,
+                @operator.Id,
+                @operator.Email,
+                @operator.DisplayName,
+                @operator.Permissions,
+                tokens.RequestToken ?? string.Empty));
+        });
+        internalControl.MapPost("/bootstrap/api-client", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            BootstrapApiClientRequest request,
+            ProductBootstrapService bootstrapService,
+            OperatorAccessService operatorAccessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "api-clients:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            var response = await bootstrapService.BootstrapInitialApiClientAsync(request, cancellationToken);
+            return TypedResults.Created($"/v1/api-clients/{response.Id:D}", response);
+        });
+        internalControl.MapGet("/operator/session", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             OperatorAccountsQueryService queryService,
@@ -76,7 +210,7 @@ public static class LawWatcherV1Endpoints
                 @operator.Permissions,
                 tokens.RequestToken ?? string.Empty));
         });
-        v1.MapPost("/operator/login", async (
+        internalControl.MapPost("/operator/login", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             OperatorLoginRequest request,
@@ -101,7 +235,11 @@ public static class LawWatcherV1Endpoints
                 return TypedResults.Unauthorized();
             }
 
-            var principal = CreateOperatorPrincipal(authentication);
+            var principal = CreateOperatorPrincipal(
+                authentication.OperatorId.Value,
+                authentication.Email,
+                authentication.DisplayName,
+                authentication.Permissions);
             await httpContext.SignInAsync(
                 OperatorCookieAuthenticationDefaults.Scheme,
                 principal,
@@ -120,7 +258,7 @@ public static class LawWatcherV1Endpoints
                 authentication.Permissions,
                 tokens.RequestToken ?? string.Empty));
         });
-        v1.MapPost("/operator/logout", async (
+        internalControl.MapPost("/operator/logout", async (
             HttpContext httpContext,
             IAntiforgery antiforgery) =>
         {
@@ -140,7 +278,7 @@ public static class LawWatcherV1Endpoints
                 Array.Empty<string>(),
                 tokens.RequestToken ?? string.Empty));
         });
-        v1.MapGet("/operator/me", async (
+        internalControl.MapGet("/operator/me", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             OperatorAccountsQueryService queryService,
@@ -162,7 +300,7 @@ public static class LawWatcherV1Endpoints
                 ? TypedResults.Unauthorized()
                 : TypedResults.Ok(@operator);
         });
-        v1.MapGet("/operators", async (
+        internalControl.MapGet("/operators", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             OperatorAccessService operatorAccessService,
@@ -182,7 +320,7 @@ public static class LawWatcherV1Endpoints
 
             return TypedResults.Ok(await queryService.GetOperatorsAsync(cancellationToken));
         });
-        v1.MapPost("/operators", async (
+        internalControl.MapPost("/operators", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             CreateOperatorAccountRequest request,
@@ -214,7 +352,7 @@ public static class LawWatcherV1Endpoints
                 "/v1/operators",
                 new AcceptedCommandResponse(operatorId, "active"));
         });
-        v1.MapPatch("/operators/{operatorId:guid}", async (
+        internalControl.MapPatch("/operators/{operatorId:guid}", async (
             Guid operatorId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -244,7 +382,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/operators/{operatorId:D}",
                 new AcceptedCommandResponse(operatorId, "updated"));
         });
-        v1.MapPost("/operators/{operatorId:guid}/deactivate", async (
+        internalControl.MapPost("/operators/{operatorId:guid}/deactivate", async (
             Guid operatorId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -269,7 +407,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/operators/{operatorId:D}",
                 new AcceptedCommandResponse(operatorId, "deactivated"));
         });
-        v1.MapPost("/operators/{operatorId:guid}/reset-password", async (
+        internalControl.MapPost("/operators/{operatorId:guid}/reset-password", async (
             Guid operatorId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -295,7 +433,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/operators/{operatorId:D}",
                 new AcceptedCommandResponse(operatorId, "updated"));
         });
-        v1.MapPost("/ai/tasks", async (
+        integration.MapPost("/ai/tasks", async (
             HttpContext httpContext,
             CreateAiEnrichmentTaskRequest request,
             ApiClientAccessService accessService,
@@ -326,11 +464,11 @@ public static class LawWatcherV1Endpoints
                 "/v1/ai/tasks",
                 new AcceptedCommandResponse(command.TaskId, "queued"));
         });
-        v1.MapGet("/system/notification-dispatches", async (AlertNotificationDispatchesQueryService queryService, CancellationToken cancellationToken) =>
+        internalControl.MapGet("/system/notification-dispatches", async (AlertNotificationDispatchesQueryService queryService, CancellationToken cancellationToken) =>
             TypedResults.Ok(await queryService.GetDispatchesAsync(cancellationToken)));
-        v1.MapGet("/system/webhook-dispatches", async (WebhookEventDispatchesQueryService queryService, CancellationToken cancellationToken) =>
+        internalControl.MapGet("/system/webhook-dispatches", async (WebhookEventDispatchesQueryService queryService, CancellationToken cancellationToken) =>
             TypedResults.Ok(await queryService.GetDispatchesAsync(cancellationToken)));
-        v1.MapGet("/system/messaging", async (
+        internalControl.MapGet("/system/messaging", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             ApiClientAccessService accessService,
@@ -352,7 +490,7 @@ public static class LawWatcherV1Endpoints
 
             return TypedResults.Ok(await queryService.GetDiagnosticsAsync(cancellationToken));
         });
-        v1.MapPost("/system/maintenance/retention", async (
+        internalControl.MapPost("/system/maintenance/retention", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             RunRetentionMaintenanceRequest request,
@@ -402,19 +540,17 @@ public static class LawWatcherV1Endpoints
                     statusCode: StatusCodes.Status400BadRequest);
             }
         });
-        v1.MapGet("/system/api-clients", async (
+        internalControl.MapGet("/system/api-clients", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
-            ApiClientAccessService accessService,
             OperatorAccessService operatorAccessService,
             ApiClientsQueryService queryService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeOperatorAsync(
                 httpContext,
                 antiforgery,
                 operatorAccessService,
-                accessService,
                 "api-clients:write",
                 cancellationToken);
             if (authorization.FailureResult is not null)
@@ -424,19 +560,17 @@ public static class LawWatcherV1Endpoints
 
             return TypedResults.Ok(await queryService.GetApiClientsAsync(cancellationToken));
         });
-        v1.MapGet("/api-clients", async (
+        internalControl.MapGet("/api-clients", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
-            ApiClientAccessService accessService,
             OperatorAccessService operatorAccessService,
             ApiClientsQueryService queryService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeOperatorAsync(
                 httpContext,
                 antiforgery,
                 operatorAccessService,
-                accessService,
                 "api-clients:write",
                 cancellationToken);
             if (authorization.FailureResult is not null)
@@ -446,18 +580,461 @@ public static class LawWatcherV1Endpoints
 
             return TypedResults.Ok(await queryService.GetApiClientsAsync(cancellationToken));
         });
+        admin.MapGet("/profiles", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            MonitoringProfilesQueryService queryService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "profiles:write",
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
 
-        v1.MapGet("/bills", async (BillsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetBillsAsync(cancellationToken)));
-        v1.MapGet("/processes", async (ProcessesQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetProcessesAsync(cancellationToken)));
-        v1.MapGet("/acts", async (ActsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetActsAsync(cancellationToken)));
-        v1.MapGet("/events", async (EventFeedQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetEventsAsync(cancellationToken)));
-        v1.MapGet("/profiles", async (MonitoringProfilesQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetProfilesAsync(cancellationToken)));
-        v1.MapPost("/profiles", async (
+            return TypedResults.Ok(await queryService.GetProfilesAsync(cancellationToken));
+        });
+        admin.MapPost("/profiles", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            CreateMonitoringProfileRequest request,
+            OperatorAccessService operatorAccessService,
+            MonitoringProfilesCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "profiles:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            var profileId = Guid.NewGuid();
+            await commandService.CreateAsync(
+                new CreateMonitoringProfileCommand(
+                    profileId,
+                    request.Name,
+                    ToAlertPolicy(request.AlertPolicy, request.DigestIntervalMinutes)),
+                cancellationToken);
+
+            foreach (var keyword in request.Keywords)
+            {
+                await commandService.AddRuleAsync(
+                    new AddMonitoringProfileRuleCommand(
+                        profileId,
+                        ProfileRule.Keyword(keyword)),
+                    cancellationToken);
+            }
+
+            return TypedResults.Accepted(
+                "/v1/admin/profiles",
+                new AcceptedCommandResponse(profileId, "active"));
+        });
+        admin.MapPost("/profiles/{profileId:guid}/rules", async (
+            Guid profileId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            AddMonitoringProfileRuleRequest request,
+            OperatorAccessService operatorAccessService,
+            MonitoringProfilesCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "profiles:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.AddRuleAsync(
+                new AddMonitoringProfileRuleCommand(profileId, ProfileRule.Keyword(request.Keyword)),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/profiles/{profileId:D}",
+                new AcceptedCommandResponse(profileId, "updated"));
+        });
+        admin.MapPatch("/profiles/{profileId:guid}/alert-policy", async (
+            Guid profileId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            ChangeMonitoringProfileAlertPolicyRequest request,
+            OperatorAccessService operatorAccessService,
+            MonitoringProfilesCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "profiles:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.ChangeAlertPolicyAsync(
+                new ChangeMonitoringProfileAlertPolicyCommand(
+                    profileId,
+                    ToAlertPolicy(request.AlertPolicy, request.DigestIntervalMinutes)),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/profiles/{profileId:D}",
+                new AcceptedCommandResponse(profileId, "updated"));
+        });
+        admin.MapDelete("/profiles/{profileId:guid}", async (
+            Guid profileId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            MonitoringProfilesCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "profiles:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.DeactivateAsync(
+                new DeactivateMonitoringProfileCommand(profileId),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/profiles/{profileId:D}",
+                new AcceptedCommandResponse(profileId, "deactivated"));
+        });
+        admin.MapGet("/subscriptions", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            ProfileSubscriptionsQueryService queryService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "subscriptions:write",
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetSubscriptionsAsync(cancellationToken));
+        });
+        admin.MapPost("/subscriptions", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            CreateProfileSubscriptionRequest request,
+            OperatorAccessService operatorAccessService,
+            ProfileSubscriptionsCommandService commandService,
+            MonitoringProfilesQueryService profilesQueryService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "subscriptions:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            var profiles = await profilesQueryService.GetProfilesAsync(cancellationToken);
+            var profile = profiles.SingleOrDefault(candidate => candidate.Id == request.ProfileId);
+            if (profile is null)
+            {
+                return TypedResults.NotFound();
+            }
+
+            var subscriptionId = Guid.NewGuid();
+            await commandService.CreateAsync(
+                new CreateProfileSubscriptionCommand(
+                    subscriptionId,
+                    profile.Id,
+                    profile.Name,
+                    request.Subscriber,
+                    ToSubscriptionChannel(request.Channel),
+                    ToAlertPolicy(request.AlertPolicy, request.DigestIntervalMinutes)),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                "/v1/admin/subscriptions",
+                new AcceptedCommandResponse(subscriptionId, "active"));
+        });
+        admin.MapPatch("/subscriptions/{subscriptionId:guid}/alert-policy", async (
+            Guid subscriptionId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            ChangeProfileSubscriptionAlertPolicyRequest request,
+            OperatorAccessService operatorAccessService,
+            ProfileSubscriptionsCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "subscriptions:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.ChangeAlertPolicyAsync(
+                new ChangeProfileSubscriptionAlertPolicyCommand(
+                    subscriptionId,
+                    ToAlertPolicy(request.AlertPolicy, request.DigestIntervalMinutes)),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/subscriptions/{subscriptionId:D}",
+                new AcceptedCommandResponse(subscriptionId, "updated"));
+        });
+        admin.MapDelete("/subscriptions/{subscriptionId:guid}", async (
+            Guid subscriptionId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            ProfileSubscriptionsCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "subscriptions:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.DeactivateAsync(
+                new DeactivateProfileSubscriptionCommand(subscriptionId),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/subscriptions/{subscriptionId:D}",
+                new AcceptedCommandResponse(subscriptionId, "deactivated"));
+        });
+        admin.MapGet("/webhooks", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            WebhookRegistrationsQueryService queryService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "webhooks:write",
+                cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetWebhooksAsync(cancellationToken));
+        });
+        admin.MapPost("/webhooks", async (
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            CreateWebhookRegistrationRequest request,
+            OperatorAccessService operatorAccessService,
+            WebhookRegistrationsCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "webhooks:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            var command = new RegisterWebhookCommand(
+                Guid.NewGuid(),
+                request.Name,
+                request.CallbackUrl,
+                request.EventTypes);
+            await commandService.RegisterAsync(command, cancellationToken);
+
+            return TypedResults.Accepted(
+                "/v1/admin/webhooks",
+                new AcceptedCommandResponse(command.RegistrationId, "active"));
+        });
+        admin.MapPatch("/webhooks/{registrationId:guid}", async (
+            Guid registrationId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            UpdateWebhookRegistrationRequest request,
+            OperatorAccessService operatorAccessService,
+            WebhookRegistrationsCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "webhooks:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.UpdateAsync(
+                new UpdateWebhookCommand(
+                    registrationId,
+                    request.Name,
+                    request.CallbackUrl,
+                    request.EventTypes),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/webhooks/{registrationId:D}",
+                new AcceptedCommandResponse(registrationId, "updated"));
+        });
+        admin.MapDelete("/webhooks/{registrationId:guid}", async (
+            Guid registrationId,
+            HttpContext httpContext,
+            IAntiforgery antiforgery,
+            OperatorAccessService operatorAccessService,
+            WebhookRegistrationsCommandService commandService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeOperatorAsync(
+                httpContext,
+                antiforgery,
+                operatorAccessService,
+                "webhooks:write",
+                cancellationToken,
+                requireAntiforgery: true);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            await commandService.DeactivateAsync(
+                new DeactivateWebhookCommand(registrationId),
+                cancellationToken);
+
+            return TypedResults.Accepted(
+                $"/v1/admin/webhooks/{registrationId:D}",
+                new AcceptedCommandResponse(registrationId, "deactivated"));
+        });
+
+        integration.MapGet("/bills", async (
+            HttpContext httpContext,
+            BillsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetBillsAsync(cancellationToken));
+        });
+        integration.MapGet("/processes", async (
+            HttpContext httpContext,
+            ProcessesQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetProcessesAsync(cancellationToken));
+        });
+        integration.MapGet("/acts", async (
+            HttpContext httpContext,
+            ActsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetActsAsync(cancellationToken));
+        });
+        integration.MapGet("/events", async (
+            HttpContext httpContext,
+            EventFeedQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetEventsAsync(cancellationToken));
+        });
+        integration.MapGet("/profiles", async (
+            HttpContext httpContext,
+            MonitoringProfilesQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetProfilesAsync(cancellationToken));
+        });
+        integration.MapPost("/profiles", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             CreateMonitoringProfileRequest request,
@@ -466,14 +1043,11 @@ public static class LawWatcherV1Endpoints
             MonitoringProfilesCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "profiles:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -501,7 +1075,7 @@ public static class LawWatcherV1Endpoints
                 "/v1/profiles",
                 new AcceptedCommandResponse(profileId, "active"));
         });
-        v1.MapPost("/profiles/{profileId:guid}/rules", async (
+        integration.MapPost("/profiles/{profileId:guid}/rules", async (
             Guid profileId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -511,14 +1085,11 @@ public static class LawWatcherV1Endpoints
             MonitoringProfilesCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "profiles:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -533,7 +1104,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/profiles/{profileId:D}",
                 new AcceptedCommandResponse(profileId, "updated"));
         });
-        v1.MapPatch("/profiles/{profileId:guid}/alert-policy", async (
+        integration.MapPatch("/profiles/{profileId:guid}/alert-policy", async (
             Guid profileId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -543,14 +1114,11 @@ public static class LawWatcherV1Endpoints
             MonitoringProfilesCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "profiles:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -567,7 +1135,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/profiles/{profileId:D}",
                 new AcceptedCommandResponse(profileId, "updated"));
         });
-        v1.MapDelete("/profiles/{profileId:guid}", async (
+        integration.MapDelete("/profiles/{profileId:guid}", async (
             Guid profileId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -576,14 +1144,11 @@ public static class LawWatcherV1Endpoints
             MonitoringProfilesCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "profiles:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -598,9 +1163,21 @@ public static class LawWatcherV1Endpoints
                 $"/v1/profiles/{profileId:D}",
                 new AcceptedCommandResponse(profileId, "deactivated"));
         });
-        v1.MapGet("/subscriptions", async (ProfileSubscriptionsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetSubscriptionsAsync(cancellationToken)));
-        v1.MapPost("/subscriptions", async (
+        integration.MapGet("/subscriptions", async (
+            HttpContext httpContext,
+            ProfileSubscriptionsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetSubscriptionsAsync(cancellationToken));
+        });
+        integration.MapPost("/subscriptions", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             CreateProfileSubscriptionRequest request,
@@ -610,14 +1187,11 @@ public static class LawWatcherV1Endpoints
             MonitoringProfilesQueryService profilesQueryService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "subscriptions:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -646,7 +1220,7 @@ public static class LawWatcherV1Endpoints
                 "/v1/subscriptions",
                 new AcceptedCommandResponse(subscriptionId, "active"));
         });
-        v1.MapPatch("/subscriptions/{subscriptionId:guid}/alert-policy", async (
+        integration.MapPatch("/subscriptions/{subscriptionId:guid}/alert-policy", async (
             Guid subscriptionId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -656,14 +1230,11 @@ public static class LawWatcherV1Endpoints
             ProfileSubscriptionsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "subscriptions:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -680,7 +1251,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/subscriptions/{subscriptionId:D}",
                 new AcceptedCommandResponse(subscriptionId, "updated"));
         });
-        v1.MapDelete("/subscriptions/{subscriptionId:guid}", async (
+        integration.MapDelete("/subscriptions/{subscriptionId:guid}", async (
             Guid subscriptionId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -689,14 +1260,11 @@ public static class LawWatcherV1Endpoints
             ProfileSubscriptionsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "subscriptions:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -711,11 +1279,35 @@ public static class LawWatcherV1Endpoints
                 $"/v1/subscriptions/{subscriptionId:D}",
                 new AcceptedCommandResponse(subscriptionId, "deactivated"));
         });
-        v1.MapGet("/alerts", async (AlertsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetAlertsAsync(cancellationToken)));
-        v1.MapGet("/webhooks", async (WebhookRegistrationsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetWebhooksAsync(cancellationToken)));
-        v1.MapPost("/webhooks", async (
+        integration.MapGet("/alerts", async (
+            HttpContext httpContext,
+            AlertsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetAlertsAsync(cancellationToken));
+        });
+        integration.MapGet("/webhooks", async (
+            HttpContext httpContext,
+            WebhookRegistrationsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetWebhooksAsync(cancellationToken));
+        });
+        integration.MapPost("/webhooks", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             CreateWebhookRegistrationRequest request,
@@ -724,14 +1316,11 @@ public static class LawWatcherV1Endpoints
             WebhookRegistrationsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "webhooks:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -749,7 +1338,7 @@ public static class LawWatcherV1Endpoints
                 "/v1/webhooks",
                 new AcceptedCommandResponse(command.RegistrationId, "active"));
         });
-        v1.MapPatch("/webhooks/{registrationId:guid}", async (
+        integration.MapPatch("/webhooks/{registrationId:guid}", async (
             Guid registrationId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -759,14 +1348,11 @@ public static class LawWatcherV1Endpoints
             WebhookRegistrationsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "webhooks:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -785,7 +1371,7 @@ public static class LawWatcherV1Endpoints
                 $"/v1/webhooks/{registrationId:D}",
                 new AcceptedCommandResponse(registrationId, "updated"));
         });
-        v1.MapDelete("/webhooks/{registrationId:guid}", async (
+        integration.MapDelete("/webhooks/{registrationId:guid}", async (
             Guid registrationId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
@@ -794,14 +1380,11 @@ public static class LawWatcherV1Endpoints
             WebhookRegistrationsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeApiClientAsync(
                 httpContext,
-                antiforgery,
-                operatorAccessService,
                 accessService,
                 "webhooks:write",
-                cancellationToken,
-                requireAntiforgery: true);
+                cancellationToken);
 
             if (authorization.FailureResult is not null)
             {
@@ -816,21 +1399,19 @@ public static class LawWatcherV1Endpoints
                 $"/v1/webhooks/{registrationId:D}",
                 new AcceptedCommandResponse(registrationId, "deactivated"));
         });
-        v1.MapPost("/api-clients", async (
+        internalControl.MapPost("/api-clients", async (
             HttpContext httpContext,
             IAntiforgery antiforgery,
             CreateApiClientRequest request,
-            ApiClientAccessService accessService,
             OperatorAccessService operatorAccessService,
             ApiClientsCommandService commandService,
             IApiTokenFingerprintService tokenFingerprintService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeOperatorAsync(
                 httpContext,
                 antiforgery,
                 operatorAccessService,
-                accessService,
                 "api-clients:write",
                 cancellationToken,
                 requireAntiforgery: true);
@@ -854,22 +1435,20 @@ public static class LawWatcherV1Endpoints
                 "/v1/api-clients",
                 new AcceptedCommandResponse(clientId, "active"));
         });
-        v1.MapPatch("/api-clients/{apiClientId:guid}", async (
+        internalControl.MapPatch("/api-clients/{apiClientId:guid}", async (
             Guid apiClientId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
             UpdateApiClientRequest request,
-            ApiClientAccessService accessService,
             OperatorAccessService operatorAccessService,
             ApiClientsCommandService commandService,
             IApiTokenFingerprintService tokenFingerprintService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeOperatorAsync(
                 httpContext,
                 antiforgery,
                 operatorAccessService,
-                accessService,
                 "api-clients:write",
                 cancellationToken,
                 requireAntiforgery: true);
@@ -891,20 +1470,18 @@ public static class LawWatcherV1Endpoints
                 $"/v1/api-clients/{apiClientId:D}",
                 new AcceptedCommandResponse(apiClientId, "updated"));
         });
-        v1.MapDelete("/api-clients/{apiClientId:guid}", async (
+        internalControl.MapDelete("/api-clients/{apiClientId:guid}", async (
             Guid apiClientId,
             HttpContext httpContext,
             IAntiforgery antiforgery,
-            ApiClientAccessService accessService,
             OperatorAccessService operatorAccessService,
             ApiClientsCommandService commandService,
             CancellationToken cancellationToken) =>
         {
-            var authorization = await AuthorizeAdminRequestAsync(
+            var authorization = await AuthorizeOperatorAsync(
                 httpContext,
                 antiforgery,
                 operatorAccessService,
-                accessService,
                 "api-clients:write",
                 cancellationToken,
                 requireAntiforgery: true);
@@ -922,11 +1499,35 @@ public static class LawWatcherV1Endpoints
                 $"/v1/api-clients/{apiClientId:D}",
                 new AcceptedCommandResponse(apiClientId, "deactivated"));
         });
-        v1.MapGet("/backfills", async (BackfillRequestsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetBackfillsAsync(cancellationToken)));
-        v1.MapGet("/replays", async (ReplayRequestsQueryService queryService, CancellationToken cancellationToken) =>
-            TypedResults.Ok(await queryService.GetReplaysAsync(cancellationToken)));
-        v1.MapPost("/replays", async (
+        integration.MapGet("/backfills", async (
+            HttpContext httpContext,
+            BackfillRequestsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetBackfillsAsync(cancellationToken));
+        });
+        integration.MapGet("/replays", async (
+            HttpContext httpContext,
+            ReplayRequestsQueryService queryService,
+            ApiClientAccessService accessService,
+            CancellationToken cancellationToken) =>
+        {
+            var authorization = await AuthorizeApiClientAsync(httpContext, accessService, IntegrationReadScope, cancellationToken);
+            if (authorization.FailureResult is not null)
+            {
+                return authorization.FailureResult;
+            }
+
+            return TypedResults.Ok(await queryService.GetReplaysAsync(cancellationToken));
+        });
+        integration.MapPost("/replays", async (
             HttpContext httpContext,
             CreateReplayRequest request,
             ApiClientAccessService accessService,
@@ -955,7 +1556,7 @@ public static class LawWatcherV1Endpoints
                 "/v1/replays",
                 new AcceptedCommandResponse(command.ReplayRequestId, "queued"));
         });
-        v1.MapPost("/backfills", async (
+        integration.MapPost("/backfills", async (
             HttpContext httpContext,
             CreateBackfillRequest request,
             ApiClientAccessService accessService,
@@ -1095,6 +1696,28 @@ public static class LawWatcherV1Endpoints
         }
     }
 
+    private static IResult? ValidateBootstrapSecret(HttpRequest request, BootstrapOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.Secret))
+        {
+            return TypedResults.Problem(
+                title: "Bootstrap unavailable",
+                detail: "Bootstrap secret is not configured for this environment.",
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (!request.Headers.TryGetValue(BootstrapSecretHeaderName, out var suppliedSecret) ||
+            !string.Equals(suppliedSecret.ToString(), options.Secret, StringComparison.Ordinal))
+        {
+            return TypedResults.Problem(
+                title: "Invalid bootstrap secret",
+                detail: $"Provide the {BootstrapSecretHeaderName} header from the supported install contract.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        return null;
+    }
+
     private static async Task<ApiClientAuthorizationOutcome> AuthorizeApiClientAsync(
         HttpContext httpContext,
         ApiClientAccessService accessService,
@@ -1133,15 +1756,19 @@ public static class LawWatcherV1Endpoints
         };
     }
 
-    private static ClaimsPrincipal CreateOperatorPrincipal(OperatorAuthenticationResult authentication)
+    private static ClaimsPrincipal CreateOperatorPrincipal(
+        Guid operatorId,
+        string? email,
+        string? displayName,
+        IReadOnlyCollection<string> permissions)
     {
         var claims = new List<Claim>
         {
-            new(OperatorCookieAuthenticationDefaults.OperatorIdClaimType, authentication.OperatorId!.Value.ToString("D")),
-            new(ClaimTypes.Email, authentication.Email ?? string.Empty),
-            new(ClaimTypes.Name, authentication.DisplayName ?? authentication.Email ?? string.Empty)
+            new(OperatorCookieAuthenticationDefaults.OperatorIdClaimType, operatorId.ToString("D")),
+            new(ClaimTypes.Email, email ?? string.Empty),
+            new(ClaimTypes.Name, displayName ?? email ?? string.Empty)
         };
-        claims.AddRange(authentication.Permissions.Select(permission =>
+        claims.AddRange(permissions.Select(permission =>
             new Claim(OperatorCookieAuthenticationDefaults.PermissionClaimType, permission)));
 
         return new ClaimsPrincipal(new ClaimsIdentity(

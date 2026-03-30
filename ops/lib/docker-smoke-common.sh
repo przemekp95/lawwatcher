@@ -14,6 +14,15 @@ require_cmd() {
   }
 }
 
+curl_with_optional_bearer() {
+  if [[ -n "${LAWWATCHER_INTEGRATION_BEARER_TOKEN:-}" ]]; then
+    curl -H "Authorization: Bearer ${LAWWATCHER_INTEGRATION_BEARER_TOKEN}" "$@"
+    return
+  fi
+
+  curl "$@"
+}
+
 json_eval() {
   local code="$1"
   node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); ${code}"
@@ -33,7 +42,7 @@ wait_http_ok() {
 
   for ((attempt=0; attempt<attempts; attempt++)); do
     : >"${body_file}"
-    status="$(curl -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
+    status="$(curl_with_optional_bearer -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
     body="$(cat "${body_file}" 2>/dev/null || true)"
 
     if [[ "${status}" =~ ^2[0-9][0-9]$ && -n "$body" ]]; then
@@ -84,7 +93,7 @@ wait_http_body_contains() {
 
   for ((attempt=0; attempt<attempts; attempt++)); do
     : >"${body_file}"
-    status="$(curl -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
+    status="$(curl_with_optional_bearer -sS --max-time 5 -o "${body_file}" -w '%{http_code}' "$url" 2>/dev/null || true)"
     body="$(cat "${body_file}" 2>/dev/null || true)"
 
     if [[ "${status}" =~ ^2[0-9][0-9]$ && "${body}" == *"${expected_text}"* ]]; then
@@ -128,7 +137,7 @@ wait_http_status() {
   local status
 
   for ((attempt=0; attempt<attempts; attempt++)); do
-    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null || true)"
+    status="$(curl_with_optional_bearer -sS -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null || true)"
     if [[ "${status}" =~ ^2[0-9][0-9]$ ]]; then
       printf '%s' "${status}"
       return 0
@@ -147,7 +156,7 @@ wait_search_projection() {
   local count
 
   for ((attempt=0; attempt<attempts; attempt++)); do
-    body="$(curl -fsS --max-time 10 "$url" 2>/dev/null || true)"
+    body="$(curl_with_optional_bearer -fsS --max-time 10 "$url" 2>/dev/null || true)"
     if [[ -n "$body" ]]; then
       count="$(printf '%s' "$body" | json_eval "const hits=Array.isArray(data.hits)?data.hits:[]; const count=hits.filter(hit => hit && (hit.type==='bill' || hit.type==='act')).length; process.stdout.write(String(count));")"
       if [[ "${count}" -gt 0 ]]; then
@@ -171,7 +180,7 @@ wait_entity_completed() {
   local matched
 
   for ((attempt=0; attempt<attempts; attempt++)); do
-    body="$(curl -fsS --max-time 10 "$url" 2>/dev/null || true)"
+    body="$(curl_with_optional_bearer -fsS --max-time 10 "$url" 2>/dev/null || true)"
     if [[ -n "$body" ]]; then
       status="$(JSON_PAYLOAD="$body" ENTITY_ID="$entity_id" node -e "const data=JSON.parse(process.env.JSON_PAYLOAD); const items=Array.isArray(data)?data:(data.value||[]); const target=process.env.ENTITY_ID; const match=items.find(item => String(item.id)===target); if (match) process.stdout.write(String(match.status||''));")"
       if [[ "$status" == "completed" ]]; then
@@ -205,7 +214,7 @@ wait_notification_dispatch_for_recipient() {
   local matched
 
   for ((attempt=0; attempt<attempts; attempt++)); do
-    body="$(curl -fsS --max-time 10 "$url" 2>/dev/null || true)"
+    body="$(curl_with_optional_bearer -fsS --max-time 10 "$url" 2>/dev/null || true)"
     if [[ -n "$body" ]]; then
       found="$(JSON_PAYLOAD="$body" RECIPIENT="$recipient" node -e "const data=JSON.parse(process.env.JSON_PAYLOAD); const items=Array.isArray(data)?data:(data.value||[]); const target=process.env.RECIPIENT; process.stdout.write(items.some(item => item.recipient===target) ? '1' : '0');")"
       if [[ "$found" == "1" ]]; then
@@ -267,10 +276,27 @@ wait_default_seed_act_ocr_ready() {
   local attempts="${1:-90}"
   shift
   local compose_args=("$@")
-  local sql_sa_password="${SQLSERVER_SA_PASSWORD:-ChangeMe!123456}"
-  local sql_database="${SQLSERVER_DATABASE:-LawWatcher}"
+  local compose_env_file="${LAWWATCHER_COMPOSE_ENV_FILE:-}"
+  local sql_sa_password="${SQLSERVER_SA_PASSWORD:-}"
+  local sql_database="${SQLSERVER_DATABASE:-}"
   local artifact_count=""
   local query="SET NOCOUNT ON; SELECT COUNT(*) FROM [lawwatcher].[document_artifacts] WHERE [owner_type] = N'act' AND [source_object_key] IN (N'acts/DU/2026/501/text.txt', N'acts/DU/2026/502/text.txt');"
+
+  if [[ -z "${sql_sa_password}" && -n "${compose_env_file}" ]]; then
+    sql_sa_password="$(read_env_file_value "${compose_env_file}" "SQLSERVER_SA_PASSWORD")"
+  fi
+
+  if [[ -z "${sql_database}" && -n "${compose_env_file}" ]]; then
+    sql_database="$(read_env_file_value "${compose_env_file}" "SQLSERVER_DATABASE")"
+  fi
+
+  if [[ -z "${sql_sa_password}" ]]; then
+    sql_sa_password="ChangeMe!123456"
+  fi
+
+  if [[ -z "${sql_database}" ]]; then
+    sql_database="LawWatcher"
+  fi
 
   for ((attempt=0; attempt<attempts; attempt++)); do
     artifact_count="$(MSYS2_ARG_CONV_EXCL='/opt/mssql-tools18/bin/sqlcmd' docker "${compose_args[@]}" exec -T sqlserver /opt/mssql-tools18/bin/sqlcmd -C -S localhost -d "${sql_database}" -U sa -P "${sql_sa_password}" -h -1 -W -Q "${query}" 2>/dev/null | tr -d '\r' | tail -n 1 | xargs || true)"
@@ -321,6 +347,7 @@ ensure_docker_ollama_model() {
   shift
   local compose_args=("$@")
   local ollama_host_port="${OLLAMA_HOST_PORT:-}"
+  local attempt=0
 
   if [[ -n "${ollama_host_port}" ]] && [[ ! "${ollama_host_port}" =~ ^[0-9]+$ ]]; then
     echo "OLLAMA_HOST_PORT must be numeric when provided, got '${ollama_host_port}'." >&2
@@ -337,11 +364,22 @@ ensure_docker_ollama_model() {
     return 0
   fi
 
-  if ! docker "${compose_args[@]}" exec -T ollama ollama pull "$model" >/dev/null 2>&1; then
-    echo "Failed to pull Ollama model '${model}' inside the compose runtime." >&2
-    docker "${compose_args[@]}" logs --no-color --tail 200 ollama >&2 || true
-    exit 1
-  fi
+  for attempt in 1 2 3; do
+    if docker "${compose_args[@]}" exec -T ollama ollama pull "$model" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if docker "${compose_args[@]}" exec -T ollama ollama list | grep -Fq "$model"; then
+      return 0
+    fi
+
+    sleep 5
+    wait_http_ok "http://127.0.0.1:${ollama_host_port}/api/tags" 30 >/dev/null
+  done
+
+  echo "Failed to pull Ollama model '${model}' inside the compose runtime after ${attempt} attempts." >&2
+  docker "${compose_args[@]}" logs --no-color --tail 200 ollama >&2 || true
+  exit 1
 }
 
 docker_compose_json_array() {
@@ -386,6 +424,36 @@ random_suffix() {
 
 get_free_port() {
   node -e "const net=require('net'); const server=net.createServer(); server.listen(0, '127.0.0.1', () => { process.stdout.write(String(server.address().port)); server.close(); });"
+}
+
+read_env_file_value() {
+  local env_file="$1"
+  local requested_key="$2"
+  local line=""
+  local key=""
+  local value=""
+
+  if [[ -z "${env_file}" || ! -f "${env_file}" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+
+    if [[ "${line}" != *"="* ]]; then
+      continue
+    fi
+
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    if [[ "${key}" == "${requested_key}" ]]; then
+      printf '%s' "${value}"
+      return 0
+    fi
+  done < "${env_file}"
 }
 
 write_env_file_from_example() {

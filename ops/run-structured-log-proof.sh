@@ -35,7 +35,7 @@ cd "${repo_root}"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-structured-logs-$(random_suffix)"
-env_file="${tmp_dir}/full-host.env"
+env_file="${tmp_dir}/production.env"
 summary_path="${repo_root}/output/smoke/structured-log-proof-summary.json"
 
 api_port="$(get_free_port)"
@@ -53,7 +53,7 @@ worker_replay_health_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/full-host.env.example" \
+  "ops/env/production.env.example" \
   "${env_file}" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -72,25 +72,32 @@ write_env_file_from_example \
   "WORKERS__NOTIFICATIONS__MAXCONCURRENCY=1" \
   "WORKERS__REPLAY__MAXCONCURRENCY=1" \
   "WORKERS__PROJECTION__MAXCONCURRENCY=1" \
-  "ENABLE_OPENSEARCH=false" \
-  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "ENABLE_OPENSEARCH=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEDEMODATA=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write" \
   "LAWWATCHER__WEBHOOKS__BACKEND=SignedHttp" \
   "LAWWATCHER__WEBHOOKS__SIGNINGSECRET=${signing_secret}"
+
+export LAWWATCHER_COMPOSE_ENV_FILE="${env_file}"
 
 compose_args=(
   compose
   -p "${project_name}"
   -f ops/compose/docker-compose.yml
-  -f ops/compose/docker-compose.full-host.yml
+  -f ops/compose/docker-compose.production.yml
   --env-file "${env_file}"
-  --profile full-host
+  --profile production
+  --profile opensearch
 )
 
 if [[ "${build_local}" == "true" ]]; then
   compose_args+=(
     -f ops/compose/docker-compose.build.yml
-    -f ops/compose/docker-compose.full-host.build.yml
+    -f ops/compose/docker-compose.production.build.yml
   )
 fi
 
@@ -105,12 +112,14 @@ if [[ "${build_local}" != "true" ]]; then
 fi
 
 if [[ "${build_local}" == "true" ]]; then
-  docker "${compose_args[@]}" up -d --build ollama >/dev/null
+  docker "${compose_args[@]}" up -d --build opensearch ollama >/dev/null
 else
-  docker "${compose_args[@]}" up -d ollama >/dev/null
+  docker "${compose_args[@]}" up -d opensearch ollama >/dev/null
 fi
 
+wait_http_ok "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
 
 if [[ "${build_local}" == "true" ]]; then
   docker "${compose_args[@]}" up -d --build --remove-orphans >/dev/null
@@ -130,7 +139,7 @@ wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
 alerts_ready="false"
 for ((attempt=0; attempt<120; attempt++)); do
-  alerts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/alerts" 2>/dev/null || true)"
+  alerts_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/alerts" 2>/dev/null || true)"
   if [[ -n "${alerts_json}" ]]; then
     alerts_ready="$(printf '%s' "${alerts_json}" | json_eval "process.stdout.write(String(Array.isArray(data) && data.length > 0));")"
     if [[ "${alerts_ready}" == "true" ]]; then
@@ -145,8 +154,8 @@ if [[ "${alerts_ready}" != "true" ]]; then
   exit 1
 fi
 
-acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
-profiles_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/profiles")"
+acts_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
+profiles_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/profiles")"
 act_id="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(String(data[0].id));")"
 act_title="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(JSON.stringify(data[0].title));")"
 profile_id="$(printf '%s' "${profiles_json}" | json_eval "process.stdout.write(String(data[0].id));")"
@@ -192,9 +201,9 @@ wait_compose_logs_match "flow=replay" 90 "${compose_args[@]}" -- api worker-repl
 wait_compose_logs_match "flow=backfill" 90 "${compose_args[@]}" -- api worker-replay >/dev/null
 wait_compose_logs_match "flow=profile-subscription" 90 "${compose_args[@]}" -- api worker-notifications >/dev/null
 
-ai_task_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" | AI_TASK_ID="${ai_task_id}" node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); const task=(Array.isArray(data)?data:[]).find(item => String(item.id)===process.env.AI_TASK_ID); if (!task) process.exit(1); process.stdout.write(JSON.stringify(task));")" || {
+ai_task_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" | AI_TASK_ID="${ai_task_id}" node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(0,'utf8')); const task=(Array.isArray(data)?data:[]).find(item => String(item.id)===process.env.AI_TASK_ID); if (!task) process.exit(1); process.stdout.write(JSON.stringify(task));")" || {
   echo "Expected structured-log proof AI task '${ai_task_id}' to remain queryable after the flow=ai marker." >&2
-  curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" >&2 || true
+  curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" >&2 || true
   exit 1
 }
 

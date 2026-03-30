@@ -1,14 +1,22 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.IntegrationApi.Application;
 using LawWatcher.IntegrationApi.Domain.Backfills;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class BackfillRequestsBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     BackfillRequestsQueryService queryService,
     BackfillRequestsCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         var existingBackfills = await queryService.GetBackfillsAsync(cancellationToken);
         if (existingBackfills.Count != 0)
         {

@@ -1,14 +1,22 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.IntegrationApi.Application;
 using LawWatcher.IntegrationApi.Domain.Replays;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class ReplayRequestsBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     ReplayRequestsQueryService queryService,
     ReplayRequestsCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         var existingReplays = await queryService.GetReplaysAsync(cancellationToken);
         if (existingReplays.Count != 0)
         {

@@ -29,7 +29,7 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-operator-admin-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 cookie_jar="${tmp_dir}/cookies.txt"
 summary_path="${repo_root}/output/smoke/operator-admin-summary.json"
 
@@ -43,7 +43,7 @@ minio_console_port="$(get_free_port)"
 worker_lite_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "$env_file" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -53,8 +53,10 @@ write_env_file_from_example \
   "MINIO_API_PORT=${minio_api_port}" \
   "MINIO_CONSOLE_PORT=${minio_console_port}" \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
-  "LAWWATCHER__SEEDDATA__ENABLEWEBHOOKSUBSCRIPTIONSEED=false" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTOPERATORSEED=true"
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALOPERATOR=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATOREMAIL=admin@lawwatcher.local" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATORDISPLAYNAME=Local Admin" \
+  "LAWWATCHER__BOOTSTRAP__INITIALOPERATORPASSWORD=Admin123!"
 
 compose_args=(
   compose
@@ -82,7 +84,7 @@ else
   docker "${compose_args[@]}" up -d >/dev/null
 fi
 
-wait_http_ok "http://127.0.0.1:${api_port}/v1/system/capabilities" >/dev/null
+wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 
 last_status=""
 last_body=""
@@ -172,63 +174,63 @@ assert_status 200 "operators listing"
 operator_count="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 
 profile_without_csrf_body='{"name":"No CSRF","alertPolicy":"immediate","digestIntervalMinutes":null,"keywords":["vat"]}'
-request_json POST "${api_base}/v1/profiles" "${profile_without_csrf_body}"
+request_json POST "${api_base}/v1/admin/profiles" "${profile_without_csrf_body}"
 assert_status 400 "profile write without csrf"
 
 profile_name="Operator Created Profile $(random_suffix)"
 create_profile_body="$(PROFILE_NAME="${profile_name}" node -e "const payload={name:process.env.PROFILE_NAME, alertPolicy:'immediate', digestIntervalMinutes:null, keywords:['vat','cit']}; process.stdout.write(JSON.stringify(payload));")"
-request_json POST "${api_base}/v1/profiles" "${create_profile_body}" "X-LawWatcher-CSRF: ${csrf}"
+request_json POST "${api_base}/v1/admin/profiles" "${create_profile_body}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "create profile"
 profile_id="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.id));")"
 create_profile_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_json POST "${api_base}/v1/profiles/${profile_id}/rules" '{"keyword":"akcyza"}' "X-LawWatcher-CSRF: ${csrf}"
+request_json POST "${api_base}/v1/admin/profiles/${profile_id}/rules" '{"keyword":"akcyza"}' "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "add profile rule"
 add_profile_rule_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_json PATCH "${api_base}/v1/profiles/${profile_id}/alert-policy" '{"alertPolicy":"digest","digestIntervalMinutes":180}' "X-LawWatcher-CSRF: ${csrf}"
+request_json PATCH "${api_base}/v1/admin/profiles/${profile_id}/alert-policy" '{"alertPolicy":"digest","digestIntervalMinutes":180}' "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "change profile alert policy"
 change_profile_policy_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_no_body GET "${api_base}/v1/profiles"
+request_no_body GET "${api_base}/v1/admin/profiles"
 assert_status 200 "profiles listing"
 profile_count="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 
 subscription_email="ops.subscription.$(random_suffix)@example.test"
 create_subscription_body="$(PROFILE_ID="${profile_id}" SUBSCRIPTION_EMAIL="${subscription_email}" node -e "const payload={profileId:process.env.PROFILE_ID, subscriber:process.env.SUBSCRIPTION_EMAIL, channel:'email', alertPolicy:'immediate', digestIntervalMinutes:null}; process.stdout.write(JSON.stringify(payload));")"
-request_json POST "${api_base}/v1/subscriptions" "${create_subscription_body}" "X-LawWatcher-CSRF: ${csrf}"
+request_json POST "${api_base}/v1/admin/subscriptions" "${create_subscription_body}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "create subscription"
 subscription_id="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.id));")"
 create_subscription_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_json PATCH "${api_base}/v1/subscriptions/${subscription_id}/alert-policy" '{"alertPolicy":"digest","digestIntervalMinutes":240}' "X-LawWatcher-CSRF: ${csrf}"
+request_json PATCH "${api_base}/v1/admin/subscriptions/${subscription_id}/alert-policy" '{"alertPolicy":"digest","digestIntervalMinutes":240}' "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "change subscription alert policy"
 change_subscription_policy_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_no_body GET "${api_base}/v1/subscriptions"
+request_no_body GET "${api_base}/v1/admin/subscriptions"
 assert_status 200 "subscriptions listing"
 subscription_count="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 
-request_no_body DELETE "${api_base}/v1/subscriptions/${subscription_id}" "X-LawWatcher-CSRF: ${csrf}"
+request_no_body DELETE "${api_base}/v1/admin/subscriptions/${subscription_id}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "deactivate subscription"
 deactivated_subscription_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_no_body GET "${api_base}/v1/subscriptions"
+request_no_body GET "${api_base}/v1/admin/subscriptions"
 assert_status 200 "subscriptions after deactivate"
 subscription_count_after_deactivate="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 
-request_no_body DELETE "${api_base}/v1/profiles/${profile_id}" "X-LawWatcher-CSRF: ${csrf}"
+request_no_body DELETE "${api_base}/v1/admin/profiles/${profile_id}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "deactivate profile"
 deactivated_profile_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_no_body GET "${api_base}/v1/profiles"
+request_no_body GET "${api_base}/v1/admin/profiles"
 assert_status 200 "profiles after deactivate"
 profile_count_after_deactivate="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 
 webhook_name="Operator Managed Webhook $(random_suffix)"
 webhook_url="https://hooks.example.test/operator-admin/$(random_suffix)"
 create_webhook_body="$(WEBHOOK_NAME="${webhook_name}" WEBHOOK_URL="${webhook_url}" node -e "const payload={name:process.env.WEBHOOK_NAME, callbackUrl:process.env.WEBHOOK_URL, eventTypes:['alert.created']}; process.stdout.write(JSON.stringify(payload));")"
-request_json POST "${api_base}/v1/webhooks" "${create_webhook_body}" "X-LawWatcher-CSRF: ${csrf}"
+request_json POST "${api_base}/v1/admin/webhooks" "${create_webhook_body}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "create webhook"
 webhook_id="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.id));")"
 create_webhook_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
@@ -236,18 +238,18 @@ create_webhook_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.
 updated_webhook_name="${webhook_name} Updated"
 updated_webhook_url="${webhook_url}/v2"
 update_webhook_body="$(WEBHOOK_NAME="${updated_webhook_name}" WEBHOOK_URL="${updated_webhook_url}" node -e "const payload={name:process.env.WEBHOOK_NAME, callbackUrl:process.env.WEBHOOK_URL, eventTypes:['alert.created','bill.imported']}; process.stdout.write(JSON.stringify(payload));")"
-request_json PATCH "${api_base}/v1/webhooks/${webhook_id}" "${update_webhook_body}" "X-LawWatcher-CSRF: ${csrf}"
+request_json PATCH "${api_base}/v1/admin/webhooks/${webhook_id}" "${update_webhook_body}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "update webhook"
 update_webhook_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 
-request_no_body GET "${api_base}/v1/webhooks"
+request_no_body GET "${api_base}/v1/admin/webhooks"
 assert_status 200 "webhooks listing"
 webhook_count="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.length));")"
 updated_webhook_name_read_model="$(printf '%s' "${last_body}" | WEBHOOK_ID="${webhook_id}" node -e "const fs=require('fs'); const items=JSON.parse(fs.readFileSync(0,'utf8')); const match=items.find(item => String(item.id)===process.env.WEBHOOK_ID); process.stdout.write(String(match?.name ?? ''));")"
 updated_webhook_url_read_model="$(printf '%s' "${last_body}" | WEBHOOK_ID="${webhook_id}" node -e "const fs=require('fs'); const items=JSON.parse(fs.readFileSync(0,'utf8')); const match=items.find(item => String(item.id)===process.env.WEBHOOK_ID); process.stdout.write(String(match?.callbackUrl ?? ''));")"
 updated_webhook_event_count="$(printf '%s' "${last_body}" | WEBHOOK_ID="${webhook_id}" node -e "const fs=require('fs'); const items=JSON.parse(fs.readFileSync(0,'utf8')); const match=items.find(item => String(item.id)===process.env.WEBHOOK_ID); process.stdout.write(String((match?.eventTypes ?? []).length));")"
 
-request_no_body DELETE "${api_base}/v1/webhooks/${webhook_id}" "X-LawWatcher-CSRF: ${csrf}"
+request_no_body DELETE "${api_base}/v1/admin/webhooks/${webhook_id}" "X-LawWatcher-CSRF: ${csrf}"
 assert_status 202 "deactivate webhook"
 deactivated_webhook_status="$(printf '%s' "${last_body}" | json_eval "process.stdout.write(String(data.status));")"
 

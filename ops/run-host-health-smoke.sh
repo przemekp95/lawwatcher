@@ -34,7 +34,7 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-health-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 summary_path="${repo_root}/output/health/host-health-summary.json"
 
 api_port="$(get_free_port)"
@@ -50,7 +50,7 @@ worker_ai_health_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "$env_file" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -63,7 +63,12 @@ write_env_file_from_example \
   "WORKER_LITE_HEALTH_PORT=${worker_lite_health_port}" \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
-  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
+  "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write"
 
 compose_args=(
   compose
@@ -93,6 +98,7 @@ else
 fi
 
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
 
 api_live="$(wait_http_ok "http://127.0.0.1:${api_port}/health/live")"
 api_ready="$(wait_http_ok "http://127.0.0.1:${api_port}/health/ready")"
@@ -102,7 +108,7 @@ worker_ai_live="$(wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health
 worker_ai_ready="$(wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready")"
 worker_documents_live="$(wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity")"
 worker_documents_ready="$(wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready")"
-capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/system/capabilities")"
+capabilities_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/system/capabilities")"
 services_json="$(docker_compose_json_array "${compose_args[@]}")"
 
 ocr_enabled="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(Boolean(data.ocrEnabled)));")"

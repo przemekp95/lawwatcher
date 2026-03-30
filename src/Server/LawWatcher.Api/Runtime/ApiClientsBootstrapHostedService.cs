@@ -5,17 +5,15 @@ using Microsoft.Extensions.Options;
 namespace LawWatcher.Api.Runtime;
 
 public sealed class ApiClientsBootstrapHostedService(
-    IOptions<SeedDataOptions> options,
+    IOptions<BootstrapOptions> options,
     ApiClientsQueryService queryService,
     ApiClientsCommandService commandService,
     IApiTokenFingerprintService tokenFingerprintService) : IHostedService
 {
-    private const string ErpExportToken = "erp-export-demo-token";
-    private const string PortalIntegratorToken = "portal-integrator-demo-token";
-
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!options.Value.EnableDefaultApiClientSeed)
+        var bootstrapOptions = options.Value;
+        if (!bootstrapOptions.EnableInitialApiClient)
         {
             return;
         }
@@ -27,20 +25,39 @@ public sealed class ApiClientsBootstrapHostedService(
         }
 
         await commandService.RegisterAsync(new RegisterApiClientCommand(
-            Guid.Parse("F3E8F9CA-7345-42CB-B510-F295A5E738B3"),
-            "ERP Export",
-            "erp-export",
-            tokenFingerprintService.CreateFingerprint(ErpExportToken),
-            ["alerts:read", "replays:write"]), cancellationToken);
-        await commandService.DeactivateAsync(new DeactivateApiClientCommand(
-            Guid.Parse("F3E8F9CA-7345-42CB-B510-F295A5E738B3")), cancellationToken);
-        await commandService.RegisterAsync(new RegisterApiClientCommand(
             Guid.Parse("532AD21A-FF6D-4665-9F88-6B0295C4D6A2"),
-            "Portal Integrator",
-            "portal-integrator",
-            tokenFingerprintService.CreateFingerprint(PortalIntegratorToken),
-            ["search:read", "replays:write", "backfills:write", "ai:write", "webhooks:write", "profiles:write", "subscriptions:write", "api-clients:write"]), cancellationToken);
+            RequireValue(bootstrapOptions.InitialApiClientName, nameof(bootstrapOptions.InitialApiClientName)),
+            RequireValue(bootstrapOptions.InitialApiClientIdentifier, nameof(bootstrapOptions.InitialApiClientIdentifier)),
+            tokenFingerprintService.CreateFingerprint(RequireValue(bootstrapOptions.InitialApiClientToken, nameof(bootstrapOptions.InitialApiClientToken))),
+            RequireScopes(bootstrapOptions.InitialApiClientScopesCsv, nameof(bootstrapOptions.InitialApiClientScopesCsv))), cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private static string RequireValue(string value, string optionName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"Bootstrap option '{optionName}' must be configured when initial API client bootstrap is enabled.");
+        }
+
+        return value.Trim();
+    }
+
+    private static IReadOnlyCollection<string> RequireScopes(string scopesCsv, string optionName)
+    {
+        var normalized = scopesCsv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(scope => !string.IsNullOrWhiteSpace(scope))
+            .Select(scope => scope.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (normalized.Length == 0)
+        {
+            throw new InvalidOperationException($"Bootstrap option '{optionName}' must contain at least one scope when initial API client bootstrap is enabled.");
+        }
+
+        return normalized;
+    }
 }

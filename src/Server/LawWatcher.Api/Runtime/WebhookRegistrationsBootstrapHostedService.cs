@@ -1,13 +1,21 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.IntegrationApi.Application;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class WebhookRegistrationsBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     WebhookRegistrationsQueryService queryService,
     WebhookRegistrationsCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         var existingWebhooks = await queryService.GetWebhooksAsync(cancellationToken);
         if (existingWebhooks.Count != 0)
         {

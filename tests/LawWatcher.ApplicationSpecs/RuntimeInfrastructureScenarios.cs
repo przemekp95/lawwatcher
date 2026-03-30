@@ -16,11 +16,22 @@ internal static class RuntimeInfrastructureScenarios
 {
     public static async Task RunAsync(List<string> failures)
     {
-        var devLaptop = RuntimeProfile.Parse("dev-laptop");
-        Expect.Equal(RuntimeProfile.DevLaptop, devLaptop, "Runtime profile parser should recognize dev-laptop.", failures);
+        var dev = RuntimeProfile.Parse("dev");
+        Expect.Equal(RuntimeProfile.Dev, dev, "Runtime profile parser should recognize dev.", failures);
+        var production = RuntimeProfile.Parse("production");
+        Expect.Equal(RuntimeProfile.Production, production, "Runtime profile parser should recognize production.", failures);
+        Expect.True(
+            ThrowsUnsupportedRuntimeProfile("dev-laptop"),
+            "Runtime profile parser should reject the removed dev-laptop alias from the frozen 1.0 surface.",
+            failures);
+        Expect.True(
+            ThrowsUnsupportedRuntimeProfile("full-host"),
+            "Runtime profile parser should reject the removed full-host alias from the frozen 1.0 surface.",
+            failures);
+        AssertFrozenSupportedSurfaceUsesCanonicalNames(FindRepositoryRoot(), failures);
 
         var capabilities = SystemCapabilities.FromOptions(
-            devLaptop,
+            dev,
             new CapabilityOptions
             {
                 Ai = true,
@@ -68,8 +79,8 @@ internal static class RuntimeInfrastructureScenarios
             "SQL full-text search condition builder should split punctuation-delimited terms for native SQL Full-Text queries.",
             failures);
 
-        var fullHostCapabilities = SystemCapabilities.FromOptions(
-            RuntimeProfile.FullHost,
+        var productionCapabilities = SystemCapabilities.FromOptions(
+            RuntimeProfile.Production,
             new CapabilityOptions
             {
                 Ai = true,
@@ -77,23 +88,22 @@ internal static class RuntimeInfrastructureScenarios
                 Replay = true,
                 SemanticSearch = true,
                 HybridSearch = true
-            });
+        });
+        Expect.Equal(SearchBackend.HybridVector, selector.Select(productionCapabilities.Search), "Search backend selector should use hybrid/vector mode when the production profile enables hybrid search.", failures);
 
-        Expect.Equal(SearchBackend.HybridVector, selector.Select(fullHostCapabilities.Search), "Search backend selector should use hybrid/vector mode when full-host capabilities enable it.", failures);
-
-        var degradedFullHostCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
-            fullHostCapabilities.Search,
+        var degradedProductionCapabilities = SearchCapabilitiesRuntimeResolver.Resolve(
+            productionCapabilities.Search,
             new SearchInfrastructureCapabilities(
                 SupportsSqlFullText: true,
                 SupportsHybridSearch: false));
-        Expect.False(degradedFullHostCapabilities.UseHybridSearch, "Effective search capabilities should disable hybrid search when OpenSearch runtime support is unavailable.", failures);
-        Expect.False(degradedFullHostCapabilities.UseSemanticSearch, "Effective search capabilities should disable semantic search when OpenSearch runtime support is unavailable.", failures);
-        Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(degradedFullHostCapabilities), "Search backend selector should fall back to the projection index when hybrid search is configured but unavailable.", failures);
+        Expect.False(degradedProductionCapabilities.UseHybridSearch, "Effective search capabilities should disable hybrid search when OpenSearch runtime support is unavailable.", failures);
+        Expect.False(degradedProductionCapabilities.UseSemanticSearch, "Effective search capabilities should disable semantic search when OpenSearch runtime support is unavailable.", failures);
+        Expect.Equal(SearchBackend.ProjectionIndex, selector.Select(degradedProductionCapabilities), "Search backend selector should fall back to the projection index when hybrid search is configured but unavailable.", failures);
 
         var truthfulCapabilitiesProvider = new ConfigurationSystemCapabilitiesProvider(
             new StaticOptionsMonitor<LawWatcherRuntimeOptions>(new LawWatcherRuntimeOptions
             {
-                Profile = RuntimeProfile.FullHost.Value,
+                Profile = RuntimeProfile.Production.Value,
                 Capabilities = new CapabilityOptions
                 {
                     Ai = true,
@@ -113,7 +123,7 @@ internal static class RuntimeInfrastructureScenarios
         var enabledTruthfulCapabilitiesProvider = new ConfigurationSystemCapabilitiesProvider(
             new StaticOptionsMonitor<LawWatcherRuntimeOptions>(new LawWatcherRuntimeOptions
             {
-                Profile = RuntimeProfile.FullHost.Value,
+                Profile = RuntimeProfile.Production.Value,
                 Capabilities = new CapabilityOptions
                 {
                     Ai = true,
@@ -130,7 +140,7 @@ internal static class RuntimeInfrastructureScenarios
             new OcrInfrastructureCapabilities(SupportsConfiguredDocumentPipeline: true));
         Expect.True(enabledTruthfulCapabilitiesProvider.Current.OcrEnabled, "System capabilities provider should expose OCR only when the configured document pipeline is available.", failures);
 
-        var llmPolicy = LocalLlmExecutionPolicy.For(RuntimeProfile.DevLaptop);
+        var llmPolicy = LocalLlmExecutionPolicy.For(RuntimeProfile.Dev);
         Expect.Equal(AiActivationMode.OnDemand, llmPolicy.ActivationMode, "Local LLM execution policy should stay on-demand for the laptop profile.", failures);
         Expect.Equal(1, llmPolicy.MaxConcurrency, "Laptop-first AI worker must stay single-flight.", failures);
 
@@ -406,5 +416,94 @@ internal static class RuntimeInfrastructureScenarios
             }.IsConfigured(),
             "S3-compatible document store options should remain disabled until endpoint, access key and secret key are all present.",
             failures);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            var readmePath = Path.Combine(current.FullName, "README.md");
+            var solutionPath = Path.Combine(current.FullName, "LawWatcher.slnx");
+            if (File.Exists(readmePath) && File.Exists(solutionPath))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Could not locate the repository root for runtime contract checks.");
+    }
+
+    private static bool ThrowsUnsupportedRuntimeProfile(string value)
+    {
+        try
+        {
+            RuntimeProfile.Parse(value);
+            return false;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return true;
+        }
+    }
+
+    private static void AssertFrozenSupportedSurfaceUsesCanonicalNames(string repoRoot, List<string> failures)
+    {
+        var docsAndContracts =
+            new[]
+            {
+                "README.md",
+                "docs/INSTALL.md",
+                "docs/CONFIGURATION.md",
+                "docs/ARCHITECTURE.md",
+                "docs/VERIFICATION.md",
+                "docs/RUNBOOK.md",
+                ".github/workflows/docker-smoke.yml"
+            };
+
+        var opsFiles = Directory
+            .EnumerateFiles(Path.Combine(repoRoot, "ops"), "*", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}sql{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(path =>
+                path.EndsWith(".sh", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".example", StringComparison.OrdinalIgnoreCase))
+            .Select(path => Path.GetRelativePath(repoRoot, path).Replace('\\', '/'));
+
+        var appSettingsFiles = Directory
+            .EnumerateFiles(Path.Combine(repoRoot, "src"), "appsettings.json", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}.artifacts{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(path => Path.GetRelativePath(repoRoot, path).Replace('\\', '/'));
+
+        var supportedFiles = docsAndContracts
+            .Concat(opsFiles)
+            .Concat(appSettingsFiles)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var forbiddenMarkers =
+            new[]
+            {
+                "full-host",
+                "dev-laptop",
+                "search:read",
+                "alerts:read"
+            };
+
+        foreach (var relativePath in supportedFiles)
+        {
+            var absolutePath = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var content = File.ReadAllText(absolutePath);
+
+            foreach (var marker in forbiddenMarkers)
+            {
+                Expect.False(
+                    content.Contains(marker, StringComparison.Ordinal),
+                    $"{relativePath} should not contain legacy marker '{marker}'.",
+                    failures);
+            }
+        }
     }
 }

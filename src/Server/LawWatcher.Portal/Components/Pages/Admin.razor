@@ -28,6 +28,43 @@
         </section>
     }
 
+    @if (_bootstrapStatus.RequiresOperatorBootstrap)
+    {
+        <section class="section-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Bootstrap</p>
+                    <h2>First operator</h2>
+                </div>
+                <span class="status-pill">required</span>
+            </div>
+            <p class="admin-muted">
+                This environment has no operator account yet. Use the bootstrap secret from the production env contract to create the first operator and start the cookie + CSRF operator flow.
+            </p>
+            <form class="admin-form-grid" @onsubmit="HandleBootstrapOperatorAsync" @onsubmit:preventDefault>
+                <div class="field-stack admin-span-full">
+                    <label for="bootstrap-secret">Bootstrap secret</label>
+                    <input id="bootstrap-secret" class="portal-input" type="password" @bind="_bootstrapOperator.Secret" />
+                </div>
+                <div class="field-stack">
+                    <label for="bootstrap-operator-email">Email</label>
+                    <input id="bootstrap-operator-email" class="portal-input" @bind="_bootstrapOperator.Email" />
+                </div>
+                <div class="field-stack">
+                    <label for="bootstrap-operator-display">Display name</label>
+                    <input id="bootstrap-operator-display" class="portal-input" @bind="_bootstrapOperator.DisplayName" />
+                </div>
+                <div class="field-stack">
+                    <label for="bootstrap-operator-password">Password</label>
+                    <input id="bootstrap-operator-password" class="portal-input" type="password" @bind="_bootstrapOperator.Password" />
+                </div>
+                <div class="button-row">
+                    <button type="submit" class="portal-button" disabled="@_busy">Create first operator</button>
+                </div>
+            </form>
+        </section>
+    }
+
     <section class="section-card">
         <div class="section-heading">
             <div>
@@ -73,6 +110,47 @@
             </div>
         }
     </section>
+
+    @if (_session.IsAuthenticated && _bootstrapStatus.CanBootstrapApiClient)
+    {
+        <section class="section-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Bootstrap</p>
+                    <h2>Initial API client</h2>
+                </div>
+                <span class="status-pill">optional</span>
+            </div>
+            <p class="admin-muted">
+                Create the first bearer client for the integration platform. The raw token is shown once, so rotate it into your secret store immediately.
+            </p>
+            <form class="admin-form-grid" @onsubmit="HandleBootstrapApiClientAsync" @onsubmit:preventDefault>
+                <div class="field-stack">
+                    <label for="bootstrap-api-client-name">Name</label>
+                    <input id="bootstrap-api-client-name" class="portal-input" @bind="_bootstrapApiClient.Name" />
+                </div>
+                <div class="field-stack">
+                    <label for="bootstrap-api-client-identifier">Client identifier</label>
+                    <input id="bootstrap-api-client-identifier" class="portal-input" @bind="_bootstrapApiClient.ClientIdentifier" />
+                </div>
+                <div class="field-stack admin-span-full">
+                    <label for="bootstrap-api-client-scopes">Scopes</label>
+                    <input id="bootstrap-api-client-scopes" class="portal-input" @bind="_bootstrapApiClient.ScopesCsv" />
+                </div>
+                <div class="button-row">
+                    <button type="submit" class="portal-button" disabled="@_busy">Create initial API client</button>
+                </div>
+            </form>
+
+            @if (!string.IsNullOrWhiteSpace(_bootstrappedApiClientToken))
+            {
+                <div class="admin-top-gap">
+                    <p class="section-kicker">One-time token</p>
+                    <code>@_bootstrappedApiClientToken</code>
+                </div>
+            }
+        </section>
+    }
 
     @if (_session.IsAuthenticated)
     {
@@ -601,6 +679,7 @@
 @code {
     private readonly CancellationTokenSource _loadCancellation = new();
 
+    private BootstrapStatusResponse _bootstrapStatus = new(true, false, false, false);
     private OperatorSessionResponse _session = new(false, null, null, null, Array.Empty<string>(), string.Empty);
     private List<OperatorAccountResponse> _operators = [];
     private List<MonitoringProfileResponse> _profiles = [];
@@ -608,6 +687,8 @@
     private List<WebhookRegistrationResponse> _webhooks = [];
     private List<ApiClientResponse> _apiClients = [];
 
+    private BootstrapOperatorInput _bootstrapOperator = new();
+    private BootstrapApiClientInput _bootstrapApiClient = new();
     private LoginInput _login = new();
     private OperatorCreateInput _operatorCreate = new();
     private OperatorUpdateInput _operatorUpdate = new();
@@ -622,6 +703,7 @@
     private ApiClientCreateInput _apiClientCreate = new();
     private ApiClientUpdateInput _apiClientUpdate = new();
 
+    private string? _bootstrappedApiClientToken;
     private string? _successMessage;
     private string? _errorMessage;
     private bool _busy;
@@ -641,6 +723,7 @@
     {
         await ExecuteBusyActionAsync(async () =>
         {
+            _bootstrapStatus = await AdminClient.GetBootstrapStatusAsync(_loadCancellation.Token);
             _session = await AdminClient.GetSessionAsync(_loadCancellation.Token);
             if (_session.IsAuthenticated)
             {
@@ -655,6 +738,45 @@
                 _apiClients = [];
             }
         }, clearSuccess: false);
+    }
+
+    private async Task HandleBootstrapOperatorAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            _session = await AdminClient.BootstrapFirstOperatorAsync(
+                new BootstrapOperatorRequest(
+                    _bootstrapOperator.Email,
+                    _bootstrapOperator.DisplayName,
+                    _bootstrapOperator.Password),
+                _bootstrapOperator.Secret,
+                _loadCancellation.Token);
+
+            _bootstrapOperator = new BootstrapOperatorInput();
+            _bootstrappedApiClientToken = null;
+            await LoadDataAsync();
+            _bootstrapStatus = await AdminClient.GetBootstrapStatusAsync(_loadCancellation.Token);
+            SetSuccess("First operator bootstrapped and signed in.");
+        });
+    }
+
+    private async Task HandleBootstrapApiClientAsync()
+    {
+        await ExecuteBusyActionAsync(async () =>
+        {
+            var response = await AdminClient.BootstrapInitialApiClientAsync(
+                new BootstrapApiClientRequest(
+                    _bootstrapApiClient.Name,
+                    _bootstrapApiClient.ClientIdentifier,
+                    ParseCsv(_bootstrapApiClient.ScopesCsv)),
+                _loadCancellation.Token);
+
+            _bootstrapApiClient = new BootstrapApiClientInput();
+            _bootstrappedApiClientToken = response.Token;
+            await LoadDataAsync();
+            _bootstrapStatus = await AdminClient.GetBootstrapStatusAsync(_loadCancellation.Token);
+            SetSuccess("Initial API client created.");
+        });
     }
 
     private async Task HandleLoginAsync()
@@ -678,6 +800,8 @@
             _subscriptions = [];
             _webhooks = [];
             _apiClients = [];
+            _bootstrappedApiClientToken = null;
+            _bootstrapStatus = await AdminClient.GetBootstrapStatusAsync(_loadCancellation.Token);
             SetSuccess("Operator session closed.");
         });
     }
@@ -954,6 +1078,7 @@
         _subscriptions = (await subscriptionsTask).ToList();
         _webhooks = (await webhooksTask).ToList();
         _apiClients = (await apiClientsTask).ToList();
+        _bootstrapStatus = await AdminClient.GetBootstrapStatusAsync(_loadCancellation.Token);
     }
 
     private async Task ExecuteBusyActionAsync(Func<Task> action, bool clearSuccess = true)
@@ -1028,6 +1153,26 @@
         public string Email { get; set; } = string.Empty;
 
         public string Password { get; set; } = string.Empty;
+    }
+
+    private sealed class BootstrapOperatorInput
+    {
+        public string Secret { get; set; } = string.Empty;
+
+        public string Email { get; set; } = string.Empty;
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+    }
+
+    private sealed class BootstrapApiClientInput
+    {
+        public string Name { get; set; } = "Primary Integrator";
+
+        public string ClientIdentifier { get; set; } = "primary-integrator";
+
+        public string ScopesCsv { get; set; } = "integration:read, replays:write, backfills:write, ai:write, webhooks:write, profiles:write, subscriptions:write";
     }
 
     private sealed class OperatorCreateInput

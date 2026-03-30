@@ -1,14 +1,22 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.TaxonomyAndProfiles.Application;
 using LawWatcher.TaxonomyAndProfiles.Domain.MonitoringProfiles;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class MonitoringProfilesBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     MonitoringProfilesQueryService queryService,
     MonitoringProfilesCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         var existingProfiles = await queryService.GetProfilesAsync(cancellationToken);
         if (existingProfiles.Count != 0)
         {

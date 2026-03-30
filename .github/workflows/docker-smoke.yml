@@ -46,7 +46,7 @@ jobs:
       - name: Verify Docker-first contract
         run: bash ops/verify-docker-contract.sh
 
-  dev_laptop_linux:
+  dev_linux:
     needs: docker_contract
     runs-on: ubuntu-latest
     steps:
@@ -54,10 +54,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Baseline smoke
-        run: bash ops/run-docker-dev-laptop-smoke.sh --build-local
+        run: bash ops/run-docker-dev-smoke.sh --build-local
 
       - name: AI smoke
-        run: bash ops/run-docker-dev-laptop-smoke.sh --build-local --include-ai
+        run: bash ops/run-docker-dev-smoke.sh --build-local --include-ai
 
   host_health_linux:
     needs: docker_contract
@@ -69,7 +69,7 @@ jobs:
       - name: Host health smoke
         run: bash ops/run-host-health-smoke.sh --build-local
 
-  full_host_linux:
+  production_linux:
     if: github.event_name == 'workflow_dispatch'
     needs: docker_contract
     runs-on: ubuntu-latest
@@ -77,8 +77,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Full-host OpenSearch smoke
-        run: bash ops/run-docker-full-host-smoke.sh --build-local --include-opensearch
+      - name: Production OpenSearch smoke
+        run: bash ops/run-docker-production-smoke.sh --build-local
 
   ops_proofs_linux:
     if: github.event_name == 'workflow_dispatch'

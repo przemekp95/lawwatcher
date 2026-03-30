@@ -34,7 +34,7 @@ cd "${repo_root}"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-write-path-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 summary_path="${repo_root}/output/smoke/rabbitmq-write-path-nonblocking-summary.json"
 
 api_port="$(get_free_port)"
@@ -50,7 +50,7 @@ worker_documents_health_port="$(get_free_port)"
 ollama_host_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "${env_file}" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -65,8 +65,14 @@ write_env_file_from_example \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "WORKERS__LITE__MAXCONCURRENCY=1" \
   "WORKERS__AI__MAXCONCURRENCY=1" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true"
+
+export LAWWATCHER_COMPOSE_ENV_FILE="${env_file}"
 
 compose_args=(
   compose
@@ -167,6 +173,7 @@ fi
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/live" >/dev/null
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
 wait_http_ok "http://127.0.0.1:${worker_ai_health_port}/health/ready" >/dev/null
 wait_http_body_contains "http://127.0.0.1:${worker_documents_health_port}/health/live" "Worker.Documents host is running." 60 "worker-documents live identity" >/dev/null
 wait_http_ok "http://127.0.0.1:${worker_documents_health_port}/health/ready" >/dev/null
@@ -175,7 +182,7 @@ wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
 
 docker "${compose_args[@]}" stop worker-ai >/dev/null
 
-acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
+acts_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
 act_id="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(String(data[0].id));")"
 act_title="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(JSON.stringify(data[0].title));")"
 ai_payload="$(ACT_ID="${act_id}" ACT_TITLE_JSON="${act_title}" node -e "const title=JSON.parse(process.env.ACT_TITLE_JSON); const payload={kind:'act-summary', subjectType:'act', subjectId:process.env.ACT_ID, subjectTitle:title, prompt:'Udowodnij, ze zapis write-path nie czeka na broker consumer.'}; process.stdout.write(JSON.stringify(payload));")"
@@ -201,7 +208,7 @@ queued_task_json=""
 messaging_json=""
 backlog_ready="0"
 for ((attempt=0; attempt<90; attempt++)); do
-  queued_task_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" || true)"
+  queued_task_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/ai/tasks" || true)"
   messaging_json="$(curl -fsS --max-time 10 -H "Authorization: Bearer portal-integrator-demo-token" "http://127.0.0.1:${api_port}/v1/system/messaging" || true)"
   if [[ -n "${queued_task_json}" && -n "${messaging_json}" ]]; then
     backlog_ready="$(TASK_ID="${task_id}" TASKS_JSON="${queued_task_json}" MESSAGING_JSON="${messaging_json}" node -e "const tasks=JSON.parse(process.env.TASKS_JSON); const messaging=JSON.parse(process.env.MESSAGING_JSON); const task=(Array.isArray(tasks)?tasks:[]).find(item => String(item.id)===process.env.TASK_ID); const endpoints=((messaging.broker||{}).endpoints||[]); const aiEndpoint=endpoints.find(item => String(item.endpointName||'').includes('ai-enrichment-requested')); const ok=task && task.status==='queued' && aiEndpoint && Number(aiEndpoint.readyCount||0) > 0 && Number(aiEndpoint.consumerCount||0) === 0; process.stdout.write(ok ? '1' : '0');")"

@@ -1,16 +1,24 @@
 using System.Text;
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.BuildingBlocks.Ports;
 using LawWatcher.LegislativeIntake.Application;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class LegislativeIntakeBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     BillsQueryService queryService,
     IDocumentStore documentStore,
     LegislativeIntakeCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         await StoreSeedDocumentAsync(
             documentStore,
             "bills/X-310/original.txt",

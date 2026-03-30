@@ -1,16 +1,24 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.LegislativeIntake.Application;
 using LawWatcher.LegislativeProcess.Application;
 using LawWatcher.LegislativeProcess.Domain.Processes;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class LegislativeProcessBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     BillsQueryService billsQueryService,
     ProcessesQueryService processesQueryService,
     LegislativeProcessCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         var existingProcesses = await processesQueryService.GetProcessesAsync(cancellationToken);
         if (existingProcesses.Count != 0)
         {

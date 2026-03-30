@@ -31,7 +31,7 @@ cd "${repo_root}"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-retention-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 summary_path="${repo_root}/output/smoke/retention-smoke-summary.json"
 
 api_port="$(get_free_port)"
@@ -47,7 +47,7 @@ ollama_host_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "${env_file}" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -61,7 +61,11 @@ write_env_file_from_example \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write"
 
 compose_args=(
   compose

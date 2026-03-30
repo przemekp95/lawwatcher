@@ -22,6 +22,7 @@ trap cleanup EXIT
 ensure_playwright_chromium
 mkdir -p "${output_root}"
 
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="${LawWatcherIntegrationToken:-portal-integrator-demo-token}"
 wait_http_ok "${portal_base_url}/" >/dev/null
 api_capabilities_json="$(wait_http_ok "${api_base_url}/v1/system/capabilities")"
 admin_html="$(wait_http_ok "${portal_base_url}/admin")"

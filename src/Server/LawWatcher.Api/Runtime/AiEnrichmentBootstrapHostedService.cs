@@ -1,10 +1,13 @@
+using LawWatcher.BuildingBlocks.Configuration;
 using LawWatcher.AiEnrichment.Application;
 using LawWatcher.LegislativeIntake.Application;
 using LawWatcher.LegalCorpus.Application;
+using Microsoft.Extensions.Options;
 
 namespace LawWatcher.Api.Runtime;
 
 public sealed class AiEnrichmentBootstrapHostedService(
+    IOptions<BootstrapOptions> options,
     ISystemCapabilitiesProvider capabilitiesProvider,
     AiEnrichmentTasksQueryService tasksQueryService,
     AiEnrichmentCommandService commandService,
@@ -13,6 +16,11 @@ public sealed class AiEnrichmentBootstrapHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!options.Value.EnableDemoData)
+        {
+            return;
+        }
+
         if (!capabilitiesProvider.Current.Ai.Enabled)
         {
             return;

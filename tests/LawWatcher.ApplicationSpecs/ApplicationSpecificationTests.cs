@@ -1935,12 +1935,12 @@ public sealed class ApplicationSpecificationTests
             "ERP Export",
             "erp-export",
             tokenFingerprintService.CreateFingerprint(erpExportToken),
-            ["alerts:read", "alerts:read", "replays:write"]), CancellationToken.None);
+            ["integration:read", "integration:read", "replays:write"]), CancellationToken.None);
         await apiClientCommandService.UpdateAsync(new UpdateApiClientCommand(
             Guid.Parse("F3E8F9CA-7345-42CB-B510-F295A5E738B3"),
             "ERP Export Updated",
             tokenFingerprintService.CreateFingerprint("erp-export-rotated-token"),
-            ["alerts:read", "webhooks:write", "alerts:read"]), CancellationToken.None);
+            ["integration:read", "webhooks:write", "integration:read"]), CancellationToken.None);
         await apiClientCommandService.DeactivateAsync(new DeactivateApiClientCommand(
             Guid.Parse("F3E8F9CA-7345-42CB-B510-F295A5E738B3")), CancellationToken.None);
         await apiClientCommandService.DeactivateAsync(new DeactivateApiClientCommand(
@@ -1950,7 +1950,7 @@ public sealed class ApplicationSpecificationTests
             "Portal Integrator",
             "portal-integrator",
             tokenFingerprintService.CreateFingerprint(portalIntegratorToken),
-            ["search:read", "replays:write", "backfills:write", "ai:write", "webhooks:write"]), CancellationToken.None);
+            ["integration:read", "replays:write", "backfills:write", "ai:write", "webhooks:write"]), CancellationToken.None);
 
         var persistedApiClient = await apiClientRepository.GetAsync(
             new ApiClientId(Guid.Parse("F3E8F9CA-7345-42CB-B510-F295A5E738B3")),
@@ -1958,12 +1958,13 @@ public sealed class ApplicationSpecificationTests
         var apiClients = await apiClientsQueryService.GetApiClientsAsync(CancellationToken.None);
         var apiClientAccessService = new ApiClientAccessService(apiClientProjection, tokenFingerprintService);
         var portalReplayAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "replays:write", CancellationToken.None);
-        var portalSearchAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "search:read", CancellationToken.None);
+        var portalReadAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "integration:read", CancellationToken.None);
         var portalAiAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "ai:write", CancellationToken.None);
         var portalWebhookAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "webhooks:write", CancellationToken.None);
         var inactiveErpAccess = await apiClientAccessService.AuthorizeAsync("erp-export-rotated-token", "webhooks:write", CancellationToken.None);
-        var staleErpTokenAccess = await apiClientAccessService.AuthorizeAsync(erpExportToken, "alerts:read", CancellationToken.None);
-        var missingScopeAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "alerts:read", CancellationToken.None);
+        var staleErpTokenAccess = await apiClientAccessService.AuthorizeAsync(erpExportToken, "integration:read", CancellationToken.None);
+        var legacyReadAliasAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "alerts:read", CancellationToken.None);
+        var missingScopeAccess = await apiClientAccessService.AuthorizeAsync(portalIntegratorToken, "subscriptions:write", CancellationToken.None);
         var unknownTokenAccess = await apiClientAccessService.AuthorizeAsync("unknown-demo-token", "replays:write", CancellationToken.None);
 
         Expect.True(persistedApiClient is not null, "API client repository should rehydrate a saved API client aggregate from the event stream.", failures);
@@ -1973,11 +1974,12 @@ public sealed class ApplicationSpecificationTests
         Expect.Equal(2, apiClients.Count, "API clients query service should expose projected machine-to-machine clients after commands complete.", failures);
         Expect.Equal("ERP Export Updated", apiClients[0].Name, "API clients query service should expose the updated client name for stable responses.", failures);
         Expect.Equal(false, apiClients[0].IsActive, "API clients query service should expose deactivated clients.", failures);
-        Expect.SequenceEqual(["alerts:read", "webhooks:write"], apiClients[0].Scopes, "API clients query service should preserve updated deduplicated scopes in the contract response.", failures);
+        Expect.SequenceEqual(["integration:read", "webhooks:write"], apiClients[0].Scopes, "API clients query service should preserve updated deduplicated scopes in the contract response.", failures);
         Expect.Equal(tokenFingerprintService.CreateFingerprint("erp-export-rotated-token"), apiClients[0].TokenFingerprint, "API clients query service should preserve updated token fingerprint metadata.", failures);
         Expect.Equal(ApiClientAccessDecision.Authorized, portalReplayAccess.Decision, "API client access service should authorize active clients with the required replay scope.", failures);
         Expect.Equal("portal-integrator", portalReplayAccess.ClientIdentifier ?? string.Empty, "API client access service should expose the authorized client identifier.", failures);
-        Expect.Equal(ApiClientAccessDecision.Authorized, portalSearchAccess.Decision, "API client access service should authorize active clients for their declared read scopes.", failures);
+        Expect.Equal(ApiClientAccessDecision.Authorized, portalReadAccess.Decision, "API client access service should authorize active clients for the canonical integration read scope.", failures);
+        Expect.Equal(ApiClientAccessDecision.MissingScope, legacyReadAliasAccess.Decision, "API client access service should reject removed legacy read scope aliases on the frozen 1.0 surface.", failures);
         Expect.Equal(ApiClientAccessDecision.Authorized, portalAiAccess.Decision, "API client access service should authorize active clients for AI write requests when the scope is present.", failures);
         Expect.Equal(ApiClientAccessDecision.Authorized, portalWebhookAccess.Decision, "API client access service should authorize active clients for webhook write requests when the scope is present.", failures);
         Expect.Equal(ApiClientAccessDecision.InactiveClient, inactiveErpAccess.Decision, "API client access service should reject inactive clients even when the token fingerprint matches.", failures);
@@ -1995,12 +1997,12 @@ public sealed class ApplicationSpecificationTests
             "Durable Integrator",
             "durable-integrator",
             tokenFingerprintService.CreateFingerprint("durable-integrator-token"),
-            ["search:read", "replays:write"]), CancellationToken.None);
+            ["integration:read", "replays:write"]), CancellationToken.None);
         await durableApiClientCommandService.UpdateAsync(new UpdateApiClientCommand(
             Guid.Parse("AAA20B80-0A49-43F3-890B-CA85EED11D2A"),
             "Durable Integrator Updated",
             tokenFingerprintService.CreateFingerprint("durable-integrator-token-rotated"),
-            ["ai:write", "search:read"]), CancellationToken.None);
+            ["ai:write", "integration:read"]), CancellationToken.None);
         await durableApiClientCommandService.DeactivateAsync(new DeactivateApiClientCommand(
             Guid.Parse("AAA20B80-0A49-43F3-890B-CA85EED11D2A")), CancellationToken.None);
         await durableApiClientCommandService.RegisterAsync(new RegisterApiClientCommand(
@@ -2008,7 +2010,7 @@ public sealed class ApplicationSpecificationTests
             "Durable Search Client",
             "durable-search",
             tokenFingerprintService.CreateFingerprint("durable-search-token"),
-            ["search:read", "ai:write"]), CancellationToken.None);
+            ["integration:read", "ai:write"]), CancellationToken.None);
 
         var durableReloadedApiClientRepository = new FileBackedApiClientRepository(durableApiClientsRoot);
         var durableReloadedApiClientProjection = new FileBackedApiClientProjectionStore(durableApiClientsRoot);
@@ -2019,49 +2021,93 @@ public sealed class ApplicationSpecificationTests
         var durableAccessService = new ApiClientAccessService(durableReloadedApiClientProjection, tokenFingerprintService);
         var durableAuthorizedAccess = await durableAccessService.AuthorizeAsync("durable-search-token", "ai:write", CancellationToken.None);
         var durableInactiveAccess = await durableAccessService.AuthorizeAsync("durable-integrator-token-rotated", "ai:write", CancellationToken.None);
-        var durableStaleAccess = await durableAccessService.AuthorizeAsync("durable-integrator-token", "search:read", CancellationToken.None);
+        var durableStaleAccess = await durableAccessService.AuthorizeAsync("durable-integrator-token", "integration:read", CancellationToken.None);
 
         Expect.True(durablePersistedApiClient is not null, "File-backed API client repository should rehydrate a saved API client aggregate after store reload.", failures);
         Expect.Equal(false, durablePersistedApiClient?.IsActive ?? true, "File-backed API client aggregate should preserve deactivation across reload.", failures);
         Expect.Equal(2, durableApiClients.Count, "File-backed API client projection should preserve registered clients across reload.", failures);
         Expect.Equal("Durable Integrator Updated", durableApiClients[0].Name, "File-backed API client query should expose updated names after reload.", failures);
-        Expect.SequenceEqual(["ai:write", "search:read"], durableApiClients[0].Scopes, "File-backed API client query should preserve updated scopes after reload.", failures);
+        Expect.SequenceEqual(["ai:write", "integration:read"], durableApiClients[0].Scopes, "File-backed API client query should preserve updated scopes after reload.", failures);
         Expect.Equal(tokenFingerprintService.CreateFingerprint("durable-integrator-token-rotated"), durableApiClients[0].TokenFingerprint, "File-backed API client query should preserve updated token fingerprints after reload.", failures);
         Expect.Equal(ApiClientAccessDecision.Authorized, durableAuthorizedAccess.Decision, "File-backed API client projection should authorize active clients after reload.", failures);
         Expect.Equal(ApiClientAccessDecision.InactiveClient, durableInactiveAccess.Decision, "File-backed API client projection should preserve inactive clients after reload.", failures);
         Expect.Equal(ApiClientAccessDecision.UnknownToken, durableStaleAccess.Decision, "File-backed API client projection should reject stale tokens after reload.", failures);
 
-        var defaultSeedOptions = new SeedDataOptions();
-        Expect.False(defaultSeedOptions.EnableDefaultOperatorSeed, "Default seed-data configuration should keep the development operator seed disabled until explicitly enabled.", failures);
-        Expect.False(defaultSeedOptions.EnableDefaultApiClientSeed, "Default seed-data configuration should keep demo API-client seeds disabled until explicitly enabled.", failures);
+        var defaultBootstrapOptions = new BootstrapOptions();
+        Expect.True(defaultBootstrapOptions.EnableDemoData, "Default bootstrap configuration should keep demo data enabled for the developer runtime.", failures);
+        Expect.False(defaultBootstrapOptions.EnableInitialOperator, "Default bootstrap configuration should keep the initial operator disabled until explicitly enabled.", failures);
+        Expect.False(defaultBootstrapOptions.EnableInitialApiClient, "Default bootstrap configuration should keep the initial API client disabled until explicitly enabled.", failures);
+        var productionWithoutBootstrap = ConfiguredBootstrapHostedServicesPolicy.ShouldRegister(
+            RuntimeProfile.Production,
+            new BootstrapOptions
+            {
+                EnableDemoData = false,
+                EnableInitialOperator = false,
+                EnableInitialApiClient = false
+            });
+        var productionWithDemoSeed = ConfiguredBootstrapHostedServicesPolicy.ShouldRegister(
+            RuntimeProfile.Production,
+            new BootstrapOptions
+            {
+                EnableDemoData = true,
+                EnableInitialOperator = false,
+                EnableInitialApiClient = false
+            });
+        var productionWithInitialApiClient = ConfiguredBootstrapHostedServicesPolicy.ShouldRegister(
+            RuntimeProfile.Production,
+            new BootstrapOptions
+            {
+                EnableDemoData = false,
+                EnableInitialOperator = false,
+                EnableInitialApiClient = true
+            });
+        var devWithoutBootstrapOverrides = ConfiguredBootstrapHostedServicesPolicy.ShouldRegister(
+            RuntimeProfile.Dev,
+            new BootstrapOptions
+            {
+                EnableDemoData = false,
+                EnableInitialOperator = false,
+                EnableInitialApiClient = false
+            });
+
+        Expect.False(productionWithoutBootstrap, "Production runtime should keep configured bootstrap hosted services disabled when every bootstrap toggle is off.", failures);
+        Expect.True(productionWithDemoSeed, "Production runtime should honor explicit demo-data bootstrap flags when the supported smoke contract enables them.", failures);
+        Expect.True(productionWithInitialApiClient, "Production runtime should honor explicit initial API-client bootstrap flags when the supported smoke contract enables them.", failures);
+        Expect.True(devWithoutBootstrapOverrides, "Developer runtime should continue to register configured bootstrap hosted services by default.", failures);
 
         var disabledSeedApiClientRepository = new InMemoryApiClientRepository();
         var disabledSeedApiClientProjection = new InMemoryApiClientProjectionStore();
         var disabledSeedApiClientBootstrap = new ApiClientsBootstrapHostedService(
-            Options.Create(new SeedDataOptions
+            Options.Create(new BootstrapOptions
             {
-                EnableDefaultApiClientSeed = false
+                EnableInitialApiClient = false
             }),
             new ApiClientsQueryService(disabledSeedApiClientProjection),
             new ApiClientsCommandService(disabledSeedApiClientRepository, disabledSeedApiClientProjection),
             tokenFingerprintService);
         await disabledSeedApiClientBootstrap.StartAsync(CancellationToken.None);
         var disabledSeedApiClients = await new ApiClientsQueryService(disabledSeedApiClientProjection).GetApiClientsAsync(CancellationToken.None);
-        Expect.Equal(0, disabledSeedApiClients.Count, "API-client bootstrap should not seed demo machine-to-machine tokens when the seed toggle is disabled.", failures);
+        Expect.Equal(0, disabledSeedApiClients.Count, "API-client bootstrap should not create an initial machine-to-machine client when the bootstrap toggle is disabled.", failures);
 
         var enabledSeedApiClientRepository = new InMemoryApiClientRepository();
         var enabledSeedApiClientProjection = new InMemoryApiClientProjectionStore();
         var enabledSeedApiClientBootstrap = new ApiClientsBootstrapHostedService(
-            Options.Create(new SeedDataOptions
+            Options.Create(new BootstrapOptions
             {
-                EnableDefaultApiClientSeed = true
+                EnableInitialApiClient = true,
+                InitialApiClientName = "Portal Integrator",
+                InitialApiClientIdentifier = "portal-integrator",
+                InitialApiClientToken = "portal-integrator-demo-token",
+                InitialApiClientScopesCsv = "integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write"
             }),
             new ApiClientsQueryService(enabledSeedApiClientProjection),
             new ApiClientsCommandService(enabledSeedApiClientRepository, enabledSeedApiClientProjection),
             tokenFingerprintService);
         await enabledSeedApiClientBootstrap.StartAsync(CancellationToken.None);
         var enabledSeedApiClients = await new ApiClientsQueryService(enabledSeedApiClientProjection).GetApiClientsAsync(CancellationToken.None);
-        Expect.Equal(2, enabledSeedApiClients.Count, "API-client bootstrap should seed the development/demo machine-to-machine clients only when explicitly enabled.", failures);
+        Expect.Equal(1, enabledSeedApiClients.Count, "API-client bootstrap should create only the configured initial machine-to-machine client.", failures);
+        Expect.Equal("portal-integrator", enabledSeedApiClients[0].ClientIdentifier, "API-client bootstrap should preserve the configured client identifier.", failures);
+        Expect.Equal("Portal Integrator", enabledSeedApiClients[0].Name, "API-client bootstrap should preserve the configured client name.", failures);
 
         var seedBootstrapBillRepository = new InMemoryImportedBillRepository();
         var seedBootstrapBillProjection = new InMemoryImportedBillProjectionStore();
@@ -2109,6 +2155,10 @@ public sealed class ApplicationSpecificationTests
         var seedBootstrapDocumentRoot = Path.Combine(durableStateRoot, "legal-corpus-bootstrap-documents");
         var seedBootstrapDocumentStore = new LocalFileDocumentStore(seedBootstrapDocumentRoot);
         var legalCorpusBootstrap = new LegalCorpusBootstrapHostedService(
+            Options.Create(new BootstrapOptions
+            {
+                EnableDemoData = true
+            }),
             seedBootstrapActsQueryService,
             seedBootstrapBillsQueryService,
             seedBootstrapDocumentStore,
@@ -2273,11 +2323,11 @@ public sealed class ApplicationSpecificationTests
 
         var disabledSeedOperatorProjection = new InMemoryOperatorAccountProjectionStore();
         var disabledSeedOperatorBootstrap = new OperatorAccountsBootstrapHostedService(
-            Options.Create(new SeedDataOptions
+            Options.Create(new BootstrapOptions
             {
-                EnableDefaultOperatorSeed = false
+                EnableInitialOperator = false
             }),
-            disabledSeedOperatorProjection,
+            new OperatorAccountsQueryService(disabledSeedOperatorProjection),
             new OperatorAccountsCommandService(
                 new InMemoryOperatorAccountRepository(),
                 disabledSeedOperatorProjection,
@@ -2285,15 +2335,18 @@ public sealed class ApplicationSpecificationTests
                 operatorPasswordHasher));
         await disabledSeedOperatorBootstrap.StartAsync(CancellationToken.None);
         var disabledSeedOperators = await new OperatorAccountsQueryService(disabledSeedOperatorProjection).GetOperatorsAsync(CancellationToken.None);
-        Expect.Equal(0, disabledSeedOperators.Count, "Operator bootstrap should not seed the development operator account when the seed toggle is disabled.", failures);
+        Expect.Equal(0, disabledSeedOperators.Count, "Operator bootstrap should not create the initial operator when the bootstrap toggle is disabled.", failures);
 
         var enabledSeedOperatorProjection = new InMemoryOperatorAccountProjectionStore();
         var enabledSeedOperatorBootstrap = new OperatorAccountsBootstrapHostedService(
-            Options.Create(new SeedDataOptions
+            Options.Create(new BootstrapOptions
             {
-                EnableDefaultOperatorSeed = true
+                EnableInitialOperator = true,
+                InitialOperatorEmail = "admin@lawwatcher.local",
+                InitialOperatorDisplayName = "Local Admin",
+                InitialOperatorPassword = "Admin123!"
             }),
-            enabledSeedOperatorProjection,
+            new OperatorAccountsQueryService(enabledSeedOperatorProjection),
             new OperatorAccountsCommandService(
                 new InMemoryOperatorAccountRepository(),
                 enabledSeedOperatorProjection,
@@ -2301,8 +2354,8 @@ public sealed class ApplicationSpecificationTests
                 operatorPasswordHasher));
         await enabledSeedOperatorBootstrap.StartAsync(CancellationToken.None);
         var enabledSeedOperators = await new OperatorAccountsQueryService(enabledSeedOperatorProjection).GetOperatorsAsync(CancellationToken.None);
-        Expect.Equal(1, enabledSeedOperators.Count, "Operator bootstrap should seed the development operator account only when explicitly enabled.", failures);
-        Expect.Equal("admin@lawwatcher.local", enabledSeedOperators[0].Email, "Operator bootstrap should seed the configured development operator email when explicitly enabled.", failures);
+        Expect.Equal(1, enabledSeedOperators.Count, "Operator bootstrap should create only the configured initial operator.", failures);
+        Expect.Equal("admin@lawwatcher.local", enabledSeedOperators[0].Email, "Operator bootstrap should preserve the configured initial operator email.", failures);
 
         var adapterRoot = Path.Combine(AppContext.BaseDirectory, "spec-artifacts", Guid.NewGuid().ToString("N"));
         var documentStore = new LocalFileDocumentStore(adapterRoot);

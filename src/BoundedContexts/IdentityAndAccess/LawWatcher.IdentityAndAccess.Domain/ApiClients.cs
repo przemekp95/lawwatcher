@@ -76,13 +76,7 @@ public sealed record ApiScope : ValueObject
 
     public static ApiScope Of(string value)
     {
-        var normalized = value.Trim();
-        if (normalized.Length == 0)
-        {
-            throw new ArgumentException("API scope cannot be empty.", nameof(value));
-        }
-
-        return new ApiScope(normalized);
+        return new ApiScope(ApiClientScopeCatalog.Normalize(value, nameof(value), "API scope"));
     }
 
     public override string ToString() => Value;

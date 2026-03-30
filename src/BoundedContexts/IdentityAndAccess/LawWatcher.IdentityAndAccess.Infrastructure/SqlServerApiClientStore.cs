@@ -110,7 +110,7 @@ public sealed class SqlServerApiClientProjectionStore(
                 reader.GetString(1),
                 reader.GetString(2),
                 reader.GetString(3),
-                DeserializeScopes(reader.GetString(4)),
+                ApiClientScopeCatalog.NormalizeMany(DeserializeScopes(reader.GetString(4))),
                 reader.GetBoolean(5),
                 new DateTimeOffset(reader.GetDateTime(6), TimeSpan.Zero)));
         }
@@ -200,9 +200,7 @@ public sealed class SqlServerApiClientProjectionStore(
         command.Parameters.AddWithValue("@clientIdentifier", registered.Identifier);
         command.Parameters.AddWithValue("@tokenFingerprint", registered.TokenFingerprint);
         command.Parameters.AddWithValue("@scopesJson", JsonSerializer.Serialize(
-            registered.Scopes
-                .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
-                .ToArray()));
+            ApiClientScopeCatalog.NormalizeMany(registered.Scopes)));
         command.Parameters.AddWithValue("@isActive", true);
         command.Parameters.AddWithValue("@registeredAtUtc", registered.OccurredAtUtc.UtcDateTime);
         command.Parameters.AddWithValue("@updatedAtUtc", registered.OccurredAtUtc.UtcDateTime);
@@ -256,9 +254,7 @@ public sealed class SqlServerApiClientProjectionStore(
         command.Parameters.AddWithValue("@name", updated.Name);
         command.Parameters.AddWithValue("@tokenFingerprint", updated.TokenFingerprint);
         command.Parameters.AddWithValue("@scopesJson", JsonSerializer.Serialize(
-            updated.Scopes
-                .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
-                .ToArray()));
+            ApiClientScopeCatalog.NormalizeMany(updated.Scopes)));
         command.Parameters.AddWithValue("@isActive", true);
         command.Parameters.AddWithValue("@updatedAtUtc", updated.OccurredAtUtc.UtcDateTime);
         var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);

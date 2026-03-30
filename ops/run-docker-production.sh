@@ -9,16 +9,16 @@ ensure_docker_on_path
 require_cmd docker
 require_cmd curl
 
-include_opensearch=false
+env_file="ops/env/production.env.example"
 build_local=false
 ai_model="llama3.2:1b"
 embedding_model="nomic-embed-text"
 
 while (($# > 0)); do
   case "$1" in
-    --include-opensearch)
-      include_opensearch=true
-      shift
+    --env-file)
+      env_file="$2"
+      shift 2
       ;;
     --build-local)
       build_local=true
@@ -40,40 +40,38 @@ while (($# > 0)); do
 done
 
 cd "$repo_root"
+bash ops/validate-production-env.sh --env-file "$env_file"
 
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  -f ops/compose/docker-compose.full-host.yml
-  --env-file ops/env/full-host.env.example
-  --profile full-host
+  -f ops/compose/docker-compose.production.yml
+  --env-file "$env_file"
+  --profile production
+  --profile opensearch
 )
 
 if [[ "$build_local" == "true" ]]; then
   compose_args+=(
     -f ops/compose/docker-compose.build.yml
-    -f ops/compose/docker-compose.full-host.build.yml
+    -f ops/compose/docker-compose.production.build.yml
   )
-fi
-
-if [[ "$include_opensearch" == "true" ]]; then
-  compose_args+=(--profile opensearch)
 fi
 
 docker "${compose_args[@]}" down --remove-orphans || true
 docker compose \
   -f ops/compose/docker-compose.yml \
-  -f ops/compose/docker-compose.full-host.yml \
-  --env-file ops/env/full-host.env.example \
+  -f ops/compose/docker-compose.production.yml \
+  --env-file "$env_file" \
   rm -f -s worker-ai worker-lite || true
 
 if [[ "$build_local" == "true" ]]; then
   docker compose \
     -f ops/compose/docker-compose.yml \
-    -f ops/compose/docker-compose.full-host.yml \
+    -f ops/compose/docker-compose.production.yml \
     -f ops/compose/docker-compose.build.yml \
-    -f ops/compose/docker-compose.full-host.build.yml \
-    --env-file ops/env/full-host.env.example \
+    -f ops/compose/docker-compose.production.build.yml \
+    --env-file "$env_file" \
     rm -f -s worker-ai worker-lite || true
 fi
 
@@ -81,13 +79,13 @@ if [[ "$build_local" != "true" ]]; then
   pull_compose_images_or_use_local "${compose_args[@]}"
 fi
 
-if [[ "$include_opensearch" == "true" ]]; then
-  docker "${compose_args[@]}" up -d opensearch ollama
-  wait_http_ok "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
+if [[ "$build_local" == "true" ]]; then
+  docker "${compose_args[@]}" up -d --build opensearch ollama
 else
-  docker "${compose_args[@]}" up -d ollama
+  docker "${compose_args[@]}" up -d opensearch ollama
 fi
 
+wait_http_ok "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=1s" >/dev/null
 ensure_docker_ollama_model "$ai_model" "${compose_args[@]}"
 ensure_docker_ollama_model "$embedding_model" "${compose_args[@]}"
 

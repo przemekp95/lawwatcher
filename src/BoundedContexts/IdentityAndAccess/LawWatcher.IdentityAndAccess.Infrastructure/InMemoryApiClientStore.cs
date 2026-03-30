@@ -95,7 +95,7 @@ public sealed class InMemoryApiClientProjectionStore : IApiClientReadRepository,
                         updatedExisting.Update(
                             updated.Name,
                             updated.TokenFingerprint,
-                            updated.Scopes.OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase).ToArray());
+                            ApiClientScopeCatalog.NormalizeMany(updated.Scopes));
                         break;
                     case ApiClientDeactivated deactivated when _clients.TryGetValue(deactivated.ClientId.Value, out var deactivatedExisting):
                         deactivatedExisting.Deactivate();
@@ -147,7 +147,7 @@ public sealed class InMemoryApiClientProjectionStore : IApiClientReadRepository,
                 registered.Name,
                 registered.Identifier,
                 registered.TokenFingerprint,
-                registered.Scopes.OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase).ToArray(),
+                ApiClientScopeCatalog.NormalizeMany(registered.Scopes),
                 registered.OccurredAtUtc);
         }
 

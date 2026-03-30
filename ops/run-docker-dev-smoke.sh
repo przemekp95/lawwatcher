@@ -13,9 +13,14 @@ require_cmd node
 include_ai=false
 build_local=false
 ai_model="llama3.2:1b"
+env_example="ops/env/dev.env.example"
 
 while (($# > 0)); do
   case "$1" in
+    --env-file)
+      env_example="$2"
+      shift 2
+      ;;
     --include-ai)
       include_ai=true
       shift
@@ -38,8 +43,8 @@ done
 cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
-env_file="${tmp_dir}/dev-laptop.env"
-project_name="lawwatcher-dev-laptop-$(random_suffix)"
+env_file="${tmp_dir}/dev.env"
+project_name="lawwatcher-dev-$(random_suffix)"
 worker_documents_health_port="$(get_free_port)"
 ollama_host_port="$(get_free_port)"
 ocr_capability="false"
@@ -49,12 +54,18 @@ if [[ "$include_ai" == "true" ]]; then
 fi
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "$env_example" \
   "${env_file}" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true" \
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "OLLAMA_HOST_PORT=${ollama_host_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=${ocr_capability}"
+
+export LAWWATCHER_COMPOSE_ENV_FILE="${env_file}"
 
 compose_args=(
   compose
@@ -84,12 +95,16 @@ else
   docker "${compose_args[@]}" up -d >/dev/null
 fi
 
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
+
 api_health="$(wait_http_ok "http://127.0.0.1:8080/health/ready")"
+portal_health="$(wait_http_ok "http://127.0.0.1:8081/health/ready")"
 portal_root="$(wait_http_ok "http://127.0.0.1:8081/")"
 portal_admin="$(wait_http_ok "http://127.0.0.1:8081/admin")"
-acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/acts")"
+acts_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:8080/v1/acts")"
 search_json="$(wait_search_projection "http://127.0.0.1:8080/v1/search?q=VAT")"
-capabilities_json="$(curl -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
+capabilities_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:8080/v1/system/capabilities")"
+curl -fsS --max-time 10 "http://127.0.0.1:8080/openapi/integration-v1.json" >/dev/null
 
 completed_ai_task_json='null'
 verified_ai_model='null'
@@ -103,7 +118,7 @@ if [[ "$include_ai" == "true" ]]; then
 
   ocr_enabled="$(printf '%s' "$capabilities_json" | json_eval "process.stdout.write(String(Boolean(data.ocrEnabled)));")"
   if [[ "$ocr_enabled" != "true" ]]; then
-    echo "Expected OCR capability to be enabled in AI smoke lane." >&2
+    echo "Expected OCR capability to be enabled in dev AI smoke." >&2
     exit 1
   fi
 
@@ -136,8 +151,7 @@ if [[ "$include_ai" == "true" ]]; then
 fi
 
 services_json="$(docker_compose_json_array "${compose_args[@]}")"
-
-summary_path="$repo_root/output/smoke/docker-dev-laptop-linux-summary.json"
+summary_path="$repo_root/output/smoke/docker-dev-linux-summary.json"
 mkdir -p "$(dirname "$summary_path")"
 
 INCLUDE_AI="$include_ai" \

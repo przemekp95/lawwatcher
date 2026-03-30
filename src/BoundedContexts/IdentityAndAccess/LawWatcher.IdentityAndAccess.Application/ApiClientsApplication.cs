@@ -138,7 +138,7 @@ public sealed class ApiClientsQueryService(IApiClientReadRepository repository)
                 client.Name,
                 client.ClientIdentifier,
                 client.TokenFingerprint,
-                client.Scopes.ToArray(),
+                ApiClientScopeCatalog.NormalizeMany(client.Scopes),
                 client.IsActive,
                 client.RegisteredAtUtc))
             .ToArray();
@@ -193,12 +193,6 @@ public sealed class ApiClientAccessService(
 
     private static string NormalizeRequired(string value, string paramName, string label)
     {
-        var normalized = value.Trim();
-        if (normalized.Length == 0)
-        {
-            throw new ArgumentException($"{label} cannot be empty.", paramName);
-        }
-
-        return normalized;
+        return ApiClientScopeCatalog.Normalize(value, paramName, label);
     }
 }

@@ -15,7 +15,7 @@ cd "$repo_root"
 compose_args=(
   compose
   -f ops/compose/docker-compose.yml
-  --env-file ops/env/dev-laptop.env.example
+  --env-file ops/env/dev.env.example
   --profile ai
 )
 

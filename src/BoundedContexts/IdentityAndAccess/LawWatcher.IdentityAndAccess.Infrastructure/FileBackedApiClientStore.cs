@@ -102,13 +102,13 @@ public sealed class FileBackedApiClientRepository(string rootPath) : IApiClientR
                 record.Name ?? throw new InvalidOperationException("API client registered event is missing name."),
                 record.ClientIdentifier ?? throw new InvalidOperationException("API client registered event is missing client identifier."),
                 record.TokenFingerprint ?? throw new InvalidOperationException("API client registered event is missing token fingerprint."),
-                record.Scopes ?? throw new InvalidOperationException("API client registered event is missing scopes."),
+                ApiClientScopeCatalog.NormalizeMany(record.Scopes ?? throw new InvalidOperationException("API client registered event is missing scopes.")),
                 record.OccurredAtUtc),
             "updated" => new ApiClientUpdated(
                 new ApiClientId(record.ClientId),
                 record.Name ?? throw new InvalidOperationException("API client updated event is missing name."),
                 record.TokenFingerprint ?? throw new InvalidOperationException("API client updated event is missing token fingerprint."),
-                record.Scopes ?? throw new InvalidOperationException("API client updated event is missing scopes."),
+                ApiClientScopeCatalog.NormalizeMany(record.Scopes ?? throw new InvalidOperationException("API client updated event is missing scopes.")),
                 record.OccurredAtUtc),
             "deactivated" => new ApiClientDeactivated(
                 new ApiClientId(record.ClientId),
@@ -150,7 +150,7 @@ public sealed class FileBackedApiClientProjectionStore(string rootPath) : IApiCl
                         record.Name,
                         record.ClientIdentifier,
                         record.TokenFingerprint,
-                        record.Scopes,
+                        ApiClientScopeCatalog.NormalizeMany(record.Scopes),
                         record.IsActive,
                         record.RegisteredAtUtc))
                     .ToArray();
@@ -180,9 +180,7 @@ public sealed class FileBackedApiClientProjectionStore(string rootPath) : IApiCl
                                 registered.Name,
                                 registered.Identifier,
                                 registered.TokenFingerprint,
-                                registered.Scopes
-                                    .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
-                                    .ToArray(),
+                                ApiClientScopeCatalog.NormalizeMany(registered.Scopes),
                                 true,
                                 registered.OccurredAtUtc);
                             break;
@@ -191,9 +189,7 @@ public sealed class FileBackedApiClientProjectionStore(string rootPath) : IApiCl
                             {
                                 Name = updated.Name,
                                 TokenFingerprint = updated.TokenFingerprint,
-                                Scopes = updated.Scopes
-                                    .OrderBy(scope => scope, StringComparer.OrdinalIgnoreCase)
-                                    .ToArray(),
+                                Scopes = ApiClientScopeCatalog.NormalizeMany(updated.Scopes),
                                 IsActive = true
                             };
                             break;

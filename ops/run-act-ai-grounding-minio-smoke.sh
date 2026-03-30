@@ -34,7 +34,7 @@ cd "$repo_root"
 
 tmp_dir="$(mktemp -d)"
 project_name="lawwatcher-ai-minio-$(random_suffix)"
-env_file="${tmp_dir}/dev-laptop.env"
+env_file="${tmp_dir}/dev.env"
 summary_path="${repo_root}/output/smoke/act-ai-grounding-minio-summary.json"
 
 api_port="$(get_free_port)"
@@ -50,7 +50,7 @@ worker_ai_health_port="$(get_free_port)"
 worker_documents_health_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "ops/env/dev-laptop.env.example" \
+  "ops/env/dev.env.example" \
   "$env_file" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
@@ -64,7 +64,13 @@ write_env_file_from_example \
   "WORKER_AI_HEALTH_PORT=${worker_ai_health_port}" \
   "WORKER_DOCUMENTS_HEALTH_PORT=${worker_documents_health_port}" \
   "LAWWATCHER__RUNTIME__CAPABILITIES__OCR=true" \
-  "LAWWATCHER__SEEDDATA__ENABLEDEFAULTAPICLIENTSEED=true"
+  "LAWWATCHER__BOOTSTRAP__ENABLEINITIALAPICLIENT=true" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTNAME=Portal Integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTIDENTIFIER=portal-integrator" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTTOKEN=portal-integrator-demo-token" \
+  "LAWWATCHER__BOOTSTRAP__INITIALAPICLIENTSCOPESCSV=integration:read,replays:write,backfills:write,ai:write,webhooks:write,profiles:write,subscriptions:write,api-clients:write"
+
+export LAWWATCHER_COMPOSE_ENV_FILE="${env_file}"
 
 compose_args=(
   compose
@@ -94,6 +100,7 @@ else
 fi
 
 ensure_docker_ollama_model "${ai_model}" "${compose_args[@]}"
+export LAWWATCHER_INTEGRATION_BEARER_TOKEN="portal-integrator-demo-token"
 
 echo "Waiting for api readiness on port ${api_port}..." >&2
 wait_http_ok "http://127.0.0.1:${api_port}/health/ready" 120 "api readiness" >/dev/null
@@ -105,7 +112,7 @@ echo "Waiting for MinIO readiness on port ${minio_api_port}..." >&2
 minio_health_status="$(wait_http_status "http://127.0.0.1:${minio_api_port}/minio/health/live")"
 echo "Waiting for seeded act OCR artifacts..." >&2
 wait_default_seed_act_ocr_ready 120 "${compose_args[@]}"
-acts_json="$(curl -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
+acts_json="$(curl_with_optional_bearer -fsS --max-time 10 "http://127.0.0.1:${api_port}/v1/acts")"
 act_id="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(String(data[0].id));")"
 act_title="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(JSON.stringify(data[0].title));")"
 act_eli="$(printf '%s' "${acts_json}" | json_eval "process.stdout.write(String(data[0].eli));")"

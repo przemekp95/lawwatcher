@@ -76,5 +76,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/LawWatcher.ApplicationSpecs/LawWatcher.ApplicationSpecs.csproj" />
     <Project Path="tests/LawWatcher.ArchitectureSpecs/LawWatcher.ArchitectureSpecs.csproj" />
+    <Project Path="tests/LawWatcher.IntegrationApiSpecs/LawWatcher.IntegrationApiSpecs.csproj" />
   </Folder>
 </Solution>

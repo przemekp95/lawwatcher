@@ -1,7 +1,7 @@
 services:
   api:
     environment:
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-true}
       LawWatcher__Runtime__Capabilities__SemanticSearch: ${ENABLE_OPENSEARCH}
@@ -21,7 +21,7 @@ services:
 
   worker-lite:
     profiles:
-      - dev-laptop
+      - dev
 
   hybrid-init:
     image: curlimages/curl:8.12.1
@@ -39,10 +39,10 @@ services:
     image: ${LAWWATCHER_WORKER_DOCUMENTS_IMAGE}
     profiles:
       - ai
-      - full-host
+      - production
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Storage__Provider: sqlserver
       ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
       ConnectionStrings__RabbitMq: ${CONNECTIONSTRINGS__RABBITMQ}
@@ -64,18 +64,18 @@ services:
   worker-ai:
     profiles:
       - ai
-      - full-host
+      - production
     environment:
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Runtime__Capabilities__Ocr: ${LAWWATCHER__RUNTIME__CAPABILITIES__OCR:-true}
 
   worker-projection:
     image: ${LAWWATCHER_WORKER_PROJECTION_IMAGE}
     profiles:
-      - full-host
+      - production
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Runtime__Capabilities__SqlFullText: ${LAWWATCHER__RUNTIME__CAPABILITIES__SQLFULLTEXT:-false}
       LawWatcher__Storage__Provider: sqlserver
       LawWatcher__Health__Urls: http://+:8080
@@ -109,12 +109,12 @@ services:
   worker-notifications:
     image: ${LAWWATCHER_WORKER_NOTIFICATIONS_IMAGE}
     profiles:
-      - full-host
+      - production
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Storage__Provider: sqlserver
       LawWatcher__Health__Urls: http://+:8080
       ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}
@@ -139,10 +139,10 @@ services:
   worker-replay:
     image: ${LAWWATCHER_WORKER_REPLAY_IMAGE}
     profiles:
-      - full-host
+      - production
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      LawWatcher__Runtime__Profile: full-host
+      LawWatcher__Runtime__Profile: production
       LawWatcher__Storage__Provider: sqlserver
       LawWatcher__Health__Urls: http://+:8080
       ConnectionStrings__LawWatcherSqlServer: ${CONNECTIONSTRINGS__LAWWATCHERSQLSERVER}

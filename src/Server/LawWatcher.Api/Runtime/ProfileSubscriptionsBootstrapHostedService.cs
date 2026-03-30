@@ -7,13 +7,18 @@ using Microsoft.Extensions.Options;
 namespace LawWatcher.Api.Runtime;
 
 public sealed class ProfileSubscriptionsBootstrapHostedService(
+    IOptionsMonitor<BootstrapOptions> bootstrapOptions,
     MonitoringProfilesQueryService profilesQueryService,
     ProfileSubscriptionsQueryService subscriptionsQueryService,
-    ProfileSubscriptionsCommandService commandService,
-    IOptionsMonitor<SeedDataOptions> seedDataOptions) : IHostedService
+    ProfileSubscriptionsCommandService commandService) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!bootstrapOptions.CurrentValue.EnableDemoData)
+        {
+            return;
+        }
+
         var existingSubscriptions = await subscriptionsQueryService.GetSubscriptionsAsync(cancellationToken);
         if (existingSubscriptions.Count != 0)
         {
@@ -31,16 +36,6 @@ public sealed class ProfileSubscriptionsBootstrapHostedService(
             "anna.nowak@example.test",
             SubscriptionChannel.Email(),
             AlertPolicy.Immediate()), cancellationToken);
-        if (seedDataOptions.CurrentValue.EnableWebhookSubscriptionSeed)
-        {
-            await commandService.CreateAsync(new CreateProfileSubscriptionCommand(
-                Guid.Parse("DCD66622-6D38-4D3D-93EA-A28F3766A4BF"),
-                citProfile.Id,
-                citProfile.Name,
-                "https://audit.example.test/lawwatcher/alerts",
-                SubscriptionChannel.Webhook(),
-                AlertPolicy.Immediate()), cancellationToken);
-        }
         await commandService.CreateAsync(new CreateProfileSubscriptionCommand(
             Guid.Parse("8C806C18-9926-4FCE-A539-B864C623CB52"),
             vatProfile.Id,
