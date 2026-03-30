@@ -8,6 +8,7 @@
 .playwright-cli/
 .tmp-state/
 .tmp-*.env
+ops/env/*.local.env
 .backups/
 .tools/
 .publish-cache/
