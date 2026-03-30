@@ -75,6 +75,7 @@ write_env_file_from_example \
   "CONNECTIONSTRINGS__LAWWATCHERSQLSERVER=Server=sqlserver,1433;Database=LawWatcher;User Id=sa;Password=SmokeSqlServer!12345;TrustServerCertificate=True;Encrypt=False" \
   "CONNECTIONSTRINGS__RABBITMQ=amqp://lawwatcher:SmokeRabbitMq!12345@rabbitmq:5672/" \
   "STORAGE__MINIO__SECRETKEY=SmokeMinio!12345" \
+  "LAWWATCHER__BOOTSTRAP__SECRET=SmokeBootstrapSecret!12345" \
   "LAWWATCHER__WEBHOOKS__SIGNINGSECRET=SmokeWebhookSecret!12345"
 
 bash ops/run-docker-dev-smoke.sh --env-file "${dev_env}"
