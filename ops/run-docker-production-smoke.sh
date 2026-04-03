@@ -41,10 +41,23 @@ while (($# > 0)); do
 done
 
 cd "$repo_root"
-bash ops/validate-production-env.sh --env-file "$env_file"
 
 tmp_dir="$(mktemp -d)"
+validated_env="${tmp_dir}/production-contract.env"
 smoke_env="${tmp_dir}/production-smoke.env"
+write_env_file_from_example \
+  "$env_file" \
+  "$validated_env" \
+  "SQLSERVER_SA_PASSWORD=SmokeSqlServer!12345" \
+  "RABBITMQ_DEFAULT_PASS=SmokeRabbitMq!12345" \
+  "MINIO_ROOT_PASSWORD=SmokeMinio!12345" \
+  "CONNECTIONSTRINGS__LAWWATCHERSQLSERVER=Server=sqlserver,1433;Database=LawWatcher;User Id=sa;Password=SmokeSqlServer!12345;TrustServerCertificate=True;Encrypt=False" \
+  "CONNECTIONSTRINGS__RABBITMQ=amqp://lawwatcher:SmokeRabbitMq!12345@rabbitmq:5672/" \
+  "STORAGE__MINIO__SECRETKEY=SmokeMinio!12345" \
+  "LAWWATCHER__BOOTSTRAP__SECRET=SmokeBootstrapSecret!12345" \
+  "LAWWATCHER__WEBHOOKS__SIGNINGSECRET=SmokeWebhookSecret!12345"
+bash ops/validate-production-env.sh --env-file "$validated_env"
+
 project_name="lawwatcher-production-$(random_suffix)"
 api_port="$(get_free_port)"
 portal_port="$(get_free_port)"
@@ -63,7 +76,7 @@ opensearch_http_port="$(get_free_port)"
 opensearch_transport_port="$(get_free_port)"
 
 write_env_file_from_example \
-  "$env_file" \
+  "$validated_env" \
   "$smoke_env" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
