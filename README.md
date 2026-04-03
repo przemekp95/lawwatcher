@@ -43,10 +43,6 @@ dotnet build LawWatcher.slnx -c Release
 dotnet test LawWatcher.slnx -c Release --collect:"XPlat Code Coverage"
 ```
 
-Windows note:
-
-- if the repo lives under `Downloads` and Windows Code Integrity interferes with `dotnet test`, run `powershell -File ops/run-local-verification.ps1`
-
 ## Docs
 
 - [Install](docs/INSTALL.md)

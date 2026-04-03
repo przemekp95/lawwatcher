@@ -13,13 +13,7 @@ dotnet test LawWatcher.slnx -c Release --collect:"XPlat Code Coverage"
 
 This is the minimum signal that the repo is healthy.
 
-On Windows hosts where the repo lives under `Downloads`, prefer:
-
-```powershell
-powershell -File ops/run-local-verification.ps1
-```
-
-That wrapper mirrors the repo to a clean temp workspace outside `Downloads`, excludes runtime artifacts, uses a stable single-node build lane, and then runs the same `build` plus `test` contract there.
+If host policy blocks local `dotnet build` or `dotnet test` from the current workspace path, move the repo to a normal trusted local path and rerun the same commands there before treating it as a repo defect.
 
 ## Runtime Contract Gates
 
