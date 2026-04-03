@@ -3,6 +3,11 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+if [[ -z "${LAWWATCHER_RESERVED_PORTS_FILE:-}" ]]; then
+  LAWWATCHER_RESERVED_PORTS_FILE="$(mktemp)"
+  export LAWWATCHER_RESERVED_PORTS_FILE
+fi
+
 ensure_docker_on_path() {
   require_cmd docker
 }
@@ -423,7 +428,24 @@ random_suffix() {
 }
 
 get_free_port() {
-  node -e "const net=require('net'); const server=net.createServer(); server.listen(0, '127.0.0.1', () => { process.stdout.write(String(server.address().port)); server.close(); });"
+  local state_file="${LAWWATCHER_RESERVED_PORTS_FILE}"
+  local candidate=""
+
+  touch "${state_file}"
+
+  while :; do
+    candidate="$(node -e "const net=require('net'); const server=net.createServer(); server.listen(0, '127.0.0.1', () => { process.stdout.write(String(server.address().port)); server.close(); });")"
+
+    if [[ -z "${candidate}" ]]; then
+      continue
+    fi
+
+    if ! grep -Fxq "${candidate}" "${state_file}"; then
+      printf '%s\n' "${candidate}" >> "${state_file}"
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
 }
 
 read_env_file_value() {
