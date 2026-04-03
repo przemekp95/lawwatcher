@@ -55,6 +55,13 @@ worker_documents_health_port="$(get_free_port)"
 write_env_file_from_example \
   "ops/env/production.env.example" \
   "${env_file}" \
+  "SQLSERVER_SA_PASSWORD=StructuredSqlServer!12345" \
+  "RABBITMQ_DEFAULT_PASS=StructuredRabbitMq!12345" \
+  "MINIO_ROOT_PASSWORD=StructuredMinio!12345" \
+  "CONNECTIONSTRINGS__LAWWATCHERSQLSERVER=Server=sqlserver,1433;Database=LawWatcher;User Id=sa;Password=StructuredSqlServer!12345;TrustServerCertificate=True;Encrypt=False" \
+  "CONNECTIONSTRINGS__RABBITMQ=amqp://lawwatcher:StructuredRabbitMq!12345@rabbitmq:5672/" \
+  "STORAGE__MINIO__SECRETKEY=StructuredMinio!12345" \
+  "LAWWATCHER__BOOTSTRAP__SECRET=StructuredBootstrapSecret!12345" \
   "API_HOST_PORT=${api_port}" \
   "PORTAL_HOST_PORT=${portal_port}" \
   "SQLSERVER_HOST_PORT=${sql_port}" \
