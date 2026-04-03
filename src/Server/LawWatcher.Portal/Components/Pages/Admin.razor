@@ -2,6 +2,9 @@
 @rendermode InteractiveServer
 @implements IDisposable
 @inject LawWatcherPortalAdminClient AdminClient
+@inject IJSRuntime JS
+
+<script type="module" src='@Assets["Components/Pages/Admin.razor.js"]'></script>
 
 <PageTitle>Admin</PageTitle>
 
@@ -44,19 +47,19 @@
             <form class="admin-form-grid" @onsubmit="HandleBootstrapOperatorAsync" @onsubmit:preventDefault>
                 <div class="field-stack admin-span-full">
                     <label for="bootstrap-secret">Bootstrap secret</label>
-                    <input id="bootstrap-secret" class="portal-input" type="password" @bind="_bootstrapOperator.Secret" />
+                    <input id="bootstrap-secret" class="portal-input" type="password" name="bootstrap-secret" autocomplete="off" @ref="_bootstrapSecretInput" @bind="_bootstrapOperator.Secret" />
                 </div>
                 <div class="field-stack">
                     <label for="bootstrap-operator-email">Email</label>
-                    <input id="bootstrap-operator-email" class="portal-input" @bind="_bootstrapOperator.Email" />
+                    <input id="bootstrap-operator-email" class="portal-input" name="bootstrap-operator-email" autocomplete="username" @ref="_bootstrapOperatorEmailInput" @bind="_bootstrapOperator.Email" />
                 </div>
                 <div class="field-stack">
                     <label for="bootstrap-operator-display">Display name</label>
-                    <input id="bootstrap-operator-display" class="portal-input" @bind="_bootstrapOperator.DisplayName" />
+                    <input id="bootstrap-operator-display" class="portal-input" name="bootstrap-operator-display" autocomplete="name" @ref="_bootstrapOperatorDisplayInput" @bind="_bootstrapOperator.DisplayName" />
                 </div>
                 <div class="field-stack">
                     <label for="bootstrap-operator-password">Password</label>
-                    <input id="bootstrap-operator-password" class="portal-input" type="password" @bind="_bootstrapOperator.Password" />
+                    <input id="bootstrap-operator-password" class="portal-input" type="password" name="bootstrap-operator-password" autocomplete="new-password" @ref="_bootstrapOperatorPasswordInput" @bind="_bootstrapOperator.Password" />
                 </div>
                 <div class="button-row">
                     <button type="submit" class="portal-button" disabled="@_busy">Create first operator</button>
@@ -79,11 +82,11 @@
             <form class="admin-form-grid" @onsubmit="HandleLoginAsync" @onsubmit:preventDefault>
                 <div class="field-stack">
                     <label for="operator-email">Email</label>
-                    <input id="operator-email" class="portal-input" @bind="_login.Email" />
+                    <input id="operator-email" class="portal-input" name="operator-email" autocomplete="username" @ref="_loginEmailInput" @bind="_login.Email" />
                 </div>
                 <div class="field-stack">
                     <label for="operator-password">Password</label>
-                    <input id="operator-password" class="portal-input" type="password" @bind="_login.Password" />
+                    <input id="operator-password" class="portal-input" type="password" name="operator-password" autocomplete="current-password" @ref="_loginPasswordInput" @bind="_login.Password" />
                 </div>
                 <div class="button-row">
                     <button type="submit" class="portal-button" disabled="@_busy">Sign in</button>
@@ -707,6 +710,12 @@
     private string? _successMessage;
     private string? _errorMessage;
     private bool _busy;
+    private ElementReference _bootstrapSecretInput;
+    private ElementReference _bootstrapOperatorEmailInput;
+    private ElementReference _bootstrapOperatorDisplayInput;
+    private ElementReference _bootstrapOperatorPasswordInput;
+    private ElementReference _loginEmailInput;
+    private ElementReference _loginPasswordInput;
 
     protected override async Task OnInitializedAsync()
     {
@@ -717,6 +726,43 @@
     {
         _loadCancellation.Cancel();
         _loadCancellation.Dispose();
+    }
+
+    private async Task SynchronizeBootstrapOperatorInputsAsync()
+    {
+        _bootstrapOperator.Secret = await ReadDomInputValueAsync(_bootstrapSecretInput, _bootstrapOperator.Secret);
+        _bootstrapOperator.Email = await ReadDomInputValueAsync(_bootstrapOperatorEmailInput, _bootstrapOperator.Email);
+        _bootstrapOperator.DisplayName = await ReadDomInputValueAsync(_bootstrapOperatorDisplayInput, _bootstrapOperator.DisplayName);
+        _bootstrapOperator.Password = await ReadDomInputValueAsync(_bootstrapOperatorPasswordInput, _bootstrapOperator.Password);
+    }
+
+    private async Task SynchronizeLoginInputsAsync()
+    {
+        _login.Email = await ReadDomInputValueAsync(_loginEmailInput, _login.Email);
+        _login.Password = await ReadDomInputValueAsync(_loginPasswordInput, _login.Password);
+    }
+
+    // Password managers and browser autofill can update the DOM without raising
+    // the Blazor change events that keep these form models in sync.
+    private async Task<string> ReadDomInputValueAsync(ElementReference input, string fallback)
+    {
+        try
+        {
+            var currentValue = await JS.InvokeAsync<string?>("lawWatcherPortalAdmin.readInputValue", input);
+            return currentValue ?? fallback;
+        }
+        catch (JSDisconnectedException)
+        {
+            return fallback;
+        }
+        catch (JSException)
+        {
+            return fallback;
+        }
+        catch (InvalidOperationException)
+        {
+            return fallback;
+        }
     }
 
     private async Task RefreshAsync()
@@ -744,6 +790,7 @@
     {
         await ExecuteBusyActionAsync(async () =>
         {
+            await SynchronizeBootstrapOperatorInputsAsync();
             _session = await AdminClient.BootstrapFirstOperatorAsync(
                 new BootstrapOperatorRequest(
                     _bootstrapOperator.Email,
@@ -783,6 +830,7 @@
     {
         await ExecuteBusyActionAsync(async () =>
         {
+            await SynchronizeLoginInputsAsync();
             _session = await AdminClient.LoginAsync(_login.Email, _login.Password, _loadCancellation.Token);
             _login = new LoginInput();
             await LoadDataAsync();
